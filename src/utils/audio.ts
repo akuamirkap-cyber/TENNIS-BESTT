@@ -2,6 +2,12 @@ class AudioManager {
   private ctx: AudioContext | null = null;
   private hitBuffer: AudioBuffer | null = null;
   private bounceBuffer: AudioBuffer | null = null;
+  public muted: boolean = true;
+
+  setMuted(m: boolean) {
+    this.muted = m;
+    if (!m) this.init();
+  }
 
   init() {
     if (!this.ctx) {
@@ -33,6 +39,7 @@ class AudioManager {
   }
 
   playWoosh() {
+    if (this.muted) return;
     this.init();
     if (!this.ctx) return;
         
@@ -69,6 +76,7 @@ class AudioManager {
 
   playHit(type: 'sweet' | 'normal' | 'frame' = 'normal') {
 
+    if (this.muted) return;
     this.init();
     if (!this.ctx || !this.hitBuffer) return;
     
@@ -94,6 +102,7 @@ class AudioManager {
   }
 
   playBounce(speed: number) {
+    if (this.muted) return;
     this.init();
     if (!this.ctx || !this.bounceBuffer) return;
     
@@ -114,6 +123,7 @@ class AudioManager {
   
   announce(text: string) {
 
+    if (this.muted) return;
     if ('speechSynthesis' in window) {
       
       const utterance = new SpeechSynthesisUtterance(text);
@@ -151,6 +161,7 @@ class AudioManager {
   }
   
   playEnvironment(theme: string) {
+    if (this.muted) return;
     this.init();
     if (!this.ctx) return;
     const t = this.ctx.currentTime;

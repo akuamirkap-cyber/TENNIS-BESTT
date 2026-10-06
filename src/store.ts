@@ -134,6 +134,9 @@ interface EditorState {
   setSkinType: (skin: 'default' | 'mouse' | 'mumu') => void;
   ballColor: 'yellow' | 'cyan' | 'purple' | 'orange' | 'rainbow';
   setBallColor: (c: 'yellow' | 'cyan' | 'purple' | 'orange' | 'rainbow') => void;
+  gameStarted: boolean;
+  setGameStarted: (b: boolean) => void;
+  resetMatch: () => void;
 }
 
 export const anim1KeyframesDefault = [
@@ -439,6 +442,18 @@ export const useEditorStore = create<EditorState>((set) => ({
   setHitPowerMultiplier: (h) => set({ hitPowerMultiplier: h }),
   timeScale: 1.0,
   setTimeScale: (s) => set({ timeScale: s }),
+  gameStarted: false,
+  setGameStarted: (b) => set({ gameStarted: b }),
+  resetMatch: () => set({
+      playerPoints: 0,
+      botPoints: 0,
+      playerGames: 0,
+      botGames: 0,
+      playerSets: 0,
+      botSets: 0,
+      isTieBreak: false,
+      serverTurn: 'player',
+  }),
 }));
 
 export const GameState = { };

@@ -129,7 +129,29 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
 
   const fsmState = useRef<'idle' | 'run' | 'windup' | 'swing' | 'followThrough' | 'return'>('idle');
 
+  // --- Swing fluidity: pose blending & recovery ---
+  // Captured pose when a swing/charge begins, so we can blend IN smoothly from
+  // whatever pose the body is currently in (running, idle, previous swing...).
+  const blendFromPose = useRef<{ arm: THREE.Euler; torso: THREE.Euler; racket: THREE.Euler } | null>(null);
+  const swingBlendT = useRef(1); // 0 -> 1 over SWING_BLEND_DURATION seconds
+  const SWING_BLEND_DURATION = 0.09;
+
+  // Charge pose blending (hold-to-charge ready stance)
+  const chargeBlendFrom = useRef<{ arm: THREE.Euler; torso: THREE.Euler; racket: THREE.Euler } | null>(null);
+  const chargeBlendT = useRef(1);
+  const CHARGE_BLEND_DURATION = 0.15;
+
+  // Recovery after swing ends: ease the body back to the ready stance instead
+  // of snapping to idle pose.
+  const lastSwingPose = useRef<{ arm: [number, number, number]; torso: [number, number, number]; racket: [number, number, number] } | null>(null);
+  const recoverTimer = useRef(0);
+  const RECOVER_DURATION = 0.3;
+
+  const wasSwinging = useRef(false);
+  const wasCharging = useRef(false);
+
   const courtLength = useEditorStore(state => state.courtLength);
+  const gameStarted = useEditorStore(state => state.gameStarted);
 
   useEffect(() => {
     if (characterRef.current) {
@@ -139,7 +161,7 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
         characterRef.current.position.set(0, 0, 0);
       }
     }
-  }, [gameMode, courtLength]);
+  }, [gameMode, courtLength, gameStarted]);
   
   const activeAnim = useRef('swing');
   const swingProgress = useRef(0);
@@ -180,6 +202,8 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore gameplay input before the match starts (main menu / attract mode)
+      if (!useEditorStore.getState().gameStarted) return;
       const key = e.key.toLowerCase();
       
       if (key === ' ') {
@@ -268,6 +292,7 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
     
     const handleKeyUp = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
+      if (!useEditorStore.getState().gameStarted) return;
       if (['j','k','l','m','n'].includes(key) && chargingRef.current) {
         chargingRef.current = false;
         isSwinging.current = true;
@@ -305,15 +330,61 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
     const store = useEditorStore.getState();
     const courtLength = store.courtLength;
     const delta = Math.min(rawDelta, 0.033) * (store.timeScale || 1.0);
-    if (!armRef.current || !torsoRef.current || !racketRef.current || !characterRef.current || !leftLegRef.current || !rightLegRef.current) return;    let moveX = 0;
+    if (!armRef.current || !torsoRef.current || !racketRef.current || !characterRef.current || !leftLegRef.current || !rightLegRef.current) return;
+
+    // --- Swing fluidity: capture current pose whenever a swing/charge begins ---
+    if (isSwinging.current && !wasSwinging.current) {
+      blendFromPose.current = {
+        arm: armRef.current.rotation.clone(),
+        torso: torsoRef.current.rotation.clone(),
+        racket: racketRef.current.rotation.clone(),
+      };
+      swingBlendT.current = 0;
+      recoverTimer.current = 0; // cancel pending recovery
+    }
+    wasSwinging.current = isSwinging.current;
+
+    if (chargingRef.current && !wasCharging.current) {
+      chargeBlendFrom.current = {
+        arm: armRef.current.rotation.clone(),
+        torso: torsoRef.current.rotation.clone(),
+        racket: racketRef.current.rotation.clone(),
+      };
+      chargeBlendT.current = 0;
+      recoverTimer.current = 0;
+    }
+    wasCharging.current = chargingRef.current;
+
+    // Advance blend timers (frame-rate independent)
+    if (swingBlendT.current < 1) swingBlendT.current = Math.min(1, swingBlendT.current + delta / SWING_BLEND_DURATION);
+    if (chargeBlendT.current < 1) chargeBlendT.current = Math.min(1, chargeBlendT.current + delta / CHARGE_BLEND_DURATION);
+
+    // Shared nearest-ball lookup (declared at the top of the frame: filled by
+    // the swing-sync block, consumed by pose IK, then re-filled for head tracking)
+    let nearestBall: any = null;
+
+    let moveX = 0;
     let moveZ = 0;
     
-    // Joystick Jump
-    if (joystickState.jump && !isJumpingRef.current && !isAutoPlay) {
+    // Joystick Jump / Mobile Serve
+    if (joystickState.jump && !isAutoPlay) {
         const store = useEditorStore.getState();
         if (store.gameMode === 'tennis' && store.serverTurn === 'player' && store.activeBallsCount === 0) {
-            // handleServe(); // it's not exported to useFrame but wait, jump in stumble mode doesn't need handleServe
-        } else {
+            // Mobile serve flow: 1st tap = toss, 2nd tap = swing at the ball
+            if (tossTimerRef.current === 0) {
+                handleServe();
+                window.dispatchEvent(new CustomEvent('showServePower'));
+            } else if (!isSwinging.current && !chargingRef.current && hasTossedRef.current) {
+                isSwinging.current = true;
+                activeAnim.current = 'anim2';
+                swingProgress.current = 0;
+                const p = (window as any).currentServePower || 0.5;
+                hitPowerRef.current = p < 0.4 ? 0.2 : (p > 0.85 ? 1.5 : 0.8);
+                audioManager.playWoosh();
+                window.dispatchEvent(new CustomEvent('hideServePower'));
+            }
+            joystickState.jump = false; // Consume
+        } else if (!isJumpingRef.current) {
             isJumpingRef.current = true;
             jumpVelocityRef.current = 10.0;
             joystickState.jump = false; // Consume jump
@@ -427,7 +498,6 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
             moveZ = targetZ - characterRef.current.position.z;
           }
           if (distToTarget < 2.0 && targetBall.state.bouncesSinceHit > 0 && !isSwinging.current && !chargingRef.current && targetZ < courtLength && Date.now() - lastSwingTimeRef.current > 1000) {
-             chargingRef.current = true;
              lastSwingTimeRef.current = Date.now();
              isSwinging.current = true;
              const isLeft = targetBall.state.position.x < characterRef.current.position.x - 0.5;
@@ -506,7 +576,6 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
            const distToTarget = Math.sqrt(Math.pow(targetX - characterRef.current.position.x, 2) + Math.pow(targetZ - characterRef.current.position.z, 2));
            
            if (distToTarget < 1.8 && targetBall.state.bouncesSinceHit > 0 && !isSwinging.current && !chargingRef.current && targetZ < courtLength && Date.now() - lastSwingTimeRef.current > 1000) {
-              chargingRef.current = true;
               lastSwingTimeRef.current = Date.now();
               isSwinging.current = true;
               const isLeft = targetBall.state.position.x < characterRef.current.position.x - 0.5;
@@ -930,7 +999,7 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
       
       
       // Dynamic Swing Sync (Time-to-impact) & Micro-Stepping
-      let nearestBall = null;
+      nearestBall = null; // reuse the outer shared lookup (also feeds pose IK below)
       let minDistSync = Infinity;
       activeBalls.forEach(b => {
           if (!b.state.active) return;
@@ -1019,6 +1088,14 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
         isSwinging.current = false;
         isServingRef.current = false;
         hasHitBall.current = false;
+        chargingRef.current = false; // safety: never get stuck charging (breaks auto modes)
+        // --- Fluidity: begin recovery phase from the CURRENT pose ---
+        lastSwingPose.current = {
+          arm: [armRef.current.rotation.x, armRef.current.rotation.y, armRef.current.rotation.z],
+          torso: [torsoRef.current.rotation.x, torsoRef.current.rotation.y, torsoRef.current.rotation.z],
+          racket: [racketRef.current.rotation.x, racketRef.current.rotation.y, racketRef.current.rotation.z],
+        };
+        recoverTimer.current = RECOVER_DURATION;
       }
     }
 
@@ -1075,8 +1152,11 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
         if (t < 0.3) { 
           // 1. Wind-up (draw arm back, twist torso deeper for power)
           const p = t / 0.3;
-          const ease = p * p * (3 - 2 * p);
-          targetArmRot.set(0.2 - ease * 1.4, -ease * 0.8, -0.3 - ease * 0.6); 
+          // easeOutCubic: quick draw then settle at full cocked position
+          const ease = 1 - Math.pow(1 - p, 3);
+          // Anticipation: tiny counter-movement (forward nudge) before the pull-back
+          const ant = Math.sin(Math.min(p / 0.3, 1) * Math.PI) * 0.14 * (1 - p);
+          targetArmRot.set(0.2 + ant - ease * 1.4, -ease * 0.8, -0.3 - ease * 0.6); 
           targetTorsoRot.set(0, -ease * 1.0, 0); // Deeper torso twist for power
           targetRacketRot.set(Math.PI / 2 + 0.2 + ease * 0.6, ease * 0.4, -ease * 0.2);
         } else if (t < 0.45) { 
@@ -1139,7 +1219,10 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
           
           // 3. Follow through (Arm crosses body up high / opposite shoulder)
           const p = (t - 0.45) / 0.3;
-          const ease = 1 - Math.pow(1 - p, 3); // Decelerate
+          // easeOutBack: organic overshoot past the target then settle
+          const c1 = 1.35;
+          const c3 = c1 + 1;
+          const ease = 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2);
           
           // Arm Recoil
           let recoil = 0;
@@ -1158,7 +1241,8 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
         } else { 
           // 4. Return to idle
           const p = (t - 0.75) / 0.25;
-          const ease = p * p * (3 - 2 * p);
+          // easeOut: moves quickly toward ready stance, lands gently
+          const ease = 1 - Math.pow(1 - p, 2.5);
           targetArmRot.set(
             2.6 * (1 - ease) + 0.2 * ease, 
             1.2 * (1 - ease) + 0 * ease, 
@@ -1284,7 +1368,10 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
       const baseTorsoY = isMouseSkin ? useEditorStore.getState().mousePartSizes.torsoY + bounceAmt * 0.1 : baseLegY + 0.4 * partSizes.torso + bounceAmt * 0.1;
       torsoRef.current.position.y = THREE.MathUtils.lerp(torsoRef.current.position.y, baseTorsoY, 20 * delta);
       
-      targetTorsoRot.x = 0; // No forward lean
+      targetTorsoRot.x = 0; // base — lean added below
+      // Dynamic athletic forward lean proportional to actual movement speed
+      const runSpeedNorm = Math.min(1, Math.sqrt(moveX * moveX + moveZ * moveZ));
+      targetTorsoRot.x += runSpeedNorm * 0.22;
       
       // Arm swing
       if (!isSwinging.current && t === 0) {
@@ -1441,12 +1528,27 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
     }
     characterRef.current.userData.lastJump = isJumpingRef.current;
     
-    let lerpSpeed = Math.min(1, 15 * delta);
+    // --- Fluidity: phase-adaptive smoothing (frame-rate independent) ---
+    // Different body phases get different responsiveness:
+    //   windup = deliberate coil, strike = ultra snappy, follow-through = strong,
+    //   return/recover = gentle settle. This removes pose-snapping between phases.
+    let lerpRate = 14;
     if (isSwinging.current) {
-      lerpSpeed = Math.min(1, 25 * delta); // Ultra smooth low-pass filter instead of instant snap
+      const phaseT = swingProgress.current;
+      if (phaseT < 0.3) lerpRate = 16;        // windup
+      else if (phaseT < 0.45) lerpRate = 42;  // strike (snappy!)
+      else if (phaseT < 0.75) lerpRate = 24;  // follow-through
+      else lerpRate = 15;                     // return
+    } else if (recoverTimer.current > 0) {
+      lerpRate = 11;                          // ease back to ready stance
+    } else if (chargingRef.current) {
+      lerpRate = 13;                          // glide into charge stance
     }
+    let lerpSpeed = 1 - Math.exp(-lerpRate * delta);
+    // The racket whip-cracks slightly ahead of the arm during the strike
+    const racketExtraRate = isSwinging.current && swingProgress.current >= 0.28 && swingProgress.current < 0.5 ? 20 : 6;
+    let racketLerpSpeed = 1 - Math.exp(-(lerpRate + racketExtraRate) * delta);
 
-    
     if (isSwinging.current && isServingRef.current) {
         if (rightLegRef.current && leftLegRef.current) {
             // kaki kanan kedepan (Z lebih kecil karena Z negatif adalah depan karakter)
@@ -1459,8 +1561,8 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
     }
     
     
-    let nearestBall: any = null;
     let minDist = Infinity;
+    nearestBall = null;
     activeBalls.forEach(b => {
         if (!b.state.active) return;
         if (b.state.position.z < characterRef.current!.position.z - 0.5) {
@@ -1498,6 +1600,84 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
         }
     }
     
+    // --- FLUIDITY LAYER: pose blending for seamless transitions ---
+    // 1) Blend-IN: when a swing starts, glide from the body's current pose
+    //    (running / idle / previous swing) into the swing animation.
+    if (isSwinging.current && blendFromPose.current) {
+      if (swingBlendT.current < 1) {
+        const e = swingBlendT.current * swingBlendT.current * (3 - 2 * swingBlendT.current); // smoothstep
+        const bp = blendFromPose.current;
+        targetArmRot.set(
+          THREE.MathUtils.lerp(bp.arm.x, targetArmRot.x, e),
+          THREE.MathUtils.lerp(bp.arm.y, targetArmRot.y, e),
+          THREE.MathUtils.lerp(bp.arm.z, targetArmRot.z, e)
+        );
+        targetTorsoRot.set(
+          THREE.MathUtils.lerp(bp.torso.x, targetTorsoRot.x, e),
+          THREE.MathUtils.lerp(bp.torso.y, targetTorsoRot.y, e),
+          THREE.MathUtils.lerp(bp.torso.z, targetTorsoRot.z, e)
+        );
+        targetRacketRot.set(
+          THREE.MathUtils.lerp(bp.racket.x, targetRacketRot.x, e),
+          THREE.MathUtils.lerp(bp.racket.y, targetRacketRot.y, e),
+          THREE.MathUtils.lerp(bp.racket.z, targetRacketRot.z, e)
+        );
+      } else {
+        blendFromPose.current = null;
+      }
+    }
+
+    // 2) Charge stance blend-IN: glide into the ready/charge pose when holding a shot key
+    //    (skipped while swinging — the swing blend above takes priority)
+    if (chargingRef.current && !isSwinging.current && chargeBlendFrom.current) {
+      if (chargeBlendT.current < 1) {
+        const e = chargeBlendT.current * chargeBlendT.current * (3 - 2 * chargeBlendT.current);
+        const bp = chargeBlendFrom.current;
+        targetArmRot.set(
+          THREE.MathUtils.lerp(bp.arm.x, targetArmRot.x, e),
+          THREE.MathUtils.lerp(bp.arm.y, targetArmRot.y, e),
+          THREE.MathUtils.lerp(bp.arm.z, targetArmRot.z, e)
+        );
+        targetTorsoRot.set(
+          THREE.MathUtils.lerp(bp.torso.x, targetTorsoRot.x, e),
+          THREE.MathUtils.lerp(bp.torso.y, targetTorsoRot.y, e),
+          THREE.MathUtils.lerp(bp.torso.z, targetTorsoRot.z, e)
+        );
+        targetRacketRot.set(
+          THREE.MathUtils.lerp(bp.racket.x, targetRacketRot.x, e),
+          THREE.MathUtils.lerp(bp.racket.y, targetRacketRot.y, e),
+          THREE.MathUtils.lerp(bp.racket.z, targetRacketRot.z, e)
+        );
+      } else {
+        chargeBlendFrom.current = null;
+      }
+    }
+
+    // 3) Blend-OUT (recovery): after a swing finishes, ease from the final swing
+    //    pose back to the ready stance instead of snapping to idle.
+    if (!isSwinging.current && !chargingRef.current && recoverTimer.current > 0 && lastSwingPose.current) {
+      recoverTimer.current -= delta;
+      const p = 1 - Math.max(0, recoverTimer.current) / RECOVER_DURATION;
+      const e = 1 - Math.pow(1 - p, 3); // easeOutCubic
+      const lp = lastSwingPose.current;
+      targetArmRot.set(
+        THREE.MathUtils.lerp(lp.arm[0], targetArmRot.x, e),
+        THREE.MathUtils.lerp(lp.arm[1], targetArmRot.y, e),
+        THREE.MathUtils.lerp(lp.arm[2], targetArmRot.z, e)
+      );
+      targetTorsoRot.set(
+        THREE.MathUtils.lerp(lp.torso[0], targetTorsoRot.x, e),
+        THREE.MathUtils.lerp(lp.torso[1], targetTorsoRot.y, e),
+        THREE.MathUtils.lerp(lp.torso[2], targetTorsoRot.z, e)
+      );
+      targetRacketRot.set(
+        THREE.MathUtils.lerp(lp.racket[0], targetRacketRot.x, e),
+        THREE.MathUtils.lerp(lp.racket[1], targetRacketRot.y, e),
+        THREE.MathUtils.lerp(lp.racket[2], targetRacketRot.z, e)
+      );
+      if (recoverTimer.current <= 0) lastSwingPose.current = null;
+    }
+
     // Smoothly interpolate current rotation to target rotation
     armRef.current.rotation.x = THREE.MathUtils.lerp(armRef.current.rotation.x, targetArmRot.x, lerpSpeed);
     armRef.current.rotation.y = THREE.MathUtils.lerp(armRef.current.rotation.y, targetArmRot.y, lerpSpeed);
@@ -1518,18 +1698,26 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
     torsoRef.current.rotation.y = THREE.MathUtils.lerp(torsoRef.current.rotation.y, targetTorsoRot.y, lerpSpeed);
     torsoRef.current.rotation.z = THREE.MathUtils.lerp(torsoRef.current.rotation.z, targetTorsoRot.z, lerpSpeed);
 
-    racketRef.current.rotation.x = THREE.MathUtils.lerp(racketRef.current.rotation.x, targetRacketRot.x, lerpSpeed);
-    racketRef.current.rotation.y = THREE.MathUtils.lerp(racketRef.current.rotation.y, targetRacketRot.y, lerpSpeed);
-    racketRef.current.rotation.z = THREE.MathUtils.lerp(racketRef.current.rotation.z, targetRacketRot.z, lerpSpeed);
+    racketRef.current.rotation.x = THREE.MathUtils.lerp(racketRef.current.rotation.x, targetRacketRot.x, racketLerpSpeed);
+    racketRef.current.rotation.y = THREE.MathUtils.lerp(racketRef.current.rotation.y, targetRacketRot.y, racketLerpSpeed);
+    racketRef.current.rotation.z = THREE.MathUtils.lerp(racketRef.current.rotation.z, targetRacketRot.z, racketLerpSpeed);
 
     // Tossing Logic
     if (tossTimerRef.current > 0) {
        tossTimerRef.current += delta;
        const pRaw = Math.min(tossTimerRef.current / 0.6, 1);
        const p = easeInOutCubic(pRaw);
-       targetLeftArmRot.x = THREE.MathUtils.lerp(0.1, -2.9, p); 
+       targetLeftArmRot.x = THREE.MathUtils.lerp(0.1, -2.9, p);
        targetLeftArmRot.z = THREE.MathUtils.lerp(0.15, 0.5, p);
-       
+
+       // Serve power oscillates continuously while the toss is in the air,
+       // so the timing of the swing decides the power zone (red/green).
+       if (!isSwinging.current) {
+          const power = (Math.sin(state.clock.elapsedTime * 8) + 1) / 2;
+          (window as any).currentServePower = power;
+          window.dispatchEvent(new CustomEvent('updateServePower', { detail: power }));
+       }
+
        if (tossTimerRef.current > 0.4 && !hasTossedRef.current) {
            hasTossedRef.current = true;
            if (characterRef.current && leftArmRef.current) {
@@ -1538,18 +1726,20 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
               const startX = worldPos.x;
               const startY = worldPos.y + 0.3;
               const startZ = worldPos.z;
-              window.dispatchEvent(new CustomEvent('tossBall', { 
-                 detail: { 
+              window.dispatchEvent(new CustomEvent('tossBall', {
+                 detail: {
                    position: new THREE.Vector3(startX, startY, startZ),
                    velocity: new THREE.Vector3(0, Math.sqrt(4.2 * useEditorStore.getState().ballGravity), -0.5)
-                 } 
+                 }
               }));
            }
        }
-       
+
        if (tossTimerRef.current > 1.2) {
            tossTimerRef.current = 0;
            hasTossedRef.current = false;
+           // Toss expired without a swing — hide the serve meter
+           window.dispatchEvent(new CustomEvent('hideServePower'));
        }
     }
 
@@ -1570,6 +1760,7 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
   return (
     <group>
       <DustParticles characterRef={characterRef as React.RefObject<THREE.Group>} isMovingRef={isMovingRef} isSkiddingRef={isSkiddingRef} />
+      <SwingTrail racketRef={racketRef as React.RefObject<THREE.Group>} />
       <group ref={characterRef}>
         {skinType === 'mouse' || skinType === 'mumu' ? (
           skinType === 'mumu' ? (
@@ -1723,6 +1914,91 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
     </group>
   );
 });
+
+// Glowing motion trail that follows the racket head while it whips through
+// the strike & follow-through. Purely additive glow = juicy, hypercasual slash arc.
+function SwingTrail({ racketRef }: { racketRef: React.RefObject<THREE.Group> }) {
+  const TRAIL_COUNT = 42;
+  const dummy = React.useMemo(() => new THREE.Object3D(), []);
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+
+  const particles = useRef(
+    Array.from({ length: TRAIL_COUNT }, () => ({
+      active: false,
+      position: new THREE.Vector3(),
+      life: 0,
+      maxLife: 0,
+      scale: 0,
+    }))
+  );
+
+  const prevPos = useRef(new THREE.Vector3());
+  const hasPrev = useRef(false);
+  const headPos = React.useMemo(() => new THREE.Vector3(), []);
+
+  useFrame((_, rawDelta) => {
+    if (!meshRef.current || !racketRef.current) return;
+    const delta = Math.min(rawDelta, 0.05);
+
+    // Racket head world position (same anchor used for the impact frame)
+    headPos.set(0, 1.13, 0);
+    racketRef.current.localToWorld(headPos);
+
+    if (hasPrev.current) {
+      const dist = prevPos.current.distanceTo(headPos);
+      const speed = dist / Math.max(delta, 0.001);
+      // Only trail when the racket genuinely whips (strike/follow-through)
+      if (speed > 5.5) {
+        const spawns = Math.min(3, Math.max(1, Math.ceil(dist / 0.22)));
+        for (let i = 0; i < spawns; i++) {
+          const p = particles.current.find((q) => !q.active);
+          if (!p) break;
+          p.active = true;
+          p.position.lerpVectors(prevPos.current, headPos, (i + 1) / spawns);
+          p.maxLife = 0.22;
+          p.life = 0.22;
+          p.scale = Math.min(0.26, 0.07 + speed * 0.014);
+        }
+      }
+    }
+    prevPos.current.copy(headPos);
+    hasPrev.current = true;
+
+    particles.current.forEach((p, i) => {
+      if (p.active) {
+        p.life -= delta;
+        if (p.life <= 0) {
+          p.active = false;
+        } else {
+          const t = p.life / p.maxLife;
+          dummy.position.copy(p.position);
+          dummy.scale.setScalar(p.scale * t * t); // ease-out shrink
+          dummy.updateMatrix();
+          meshRef.current!.setMatrixAt(i, dummy.matrix);
+          return;
+        }
+      }
+      dummy.position.set(0, -100, 0);
+      dummy.scale.setScalar(0);
+      dummy.updateMatrix();
+      meshRef.current!.setMatrixAt(i, dummy.matrix);
+    });
+    meshRef.current.instanceMatrix.needsUpdate = true;
+  });
+
+  return (
+    <instancedMesh ref={meshRef} args={[undefined, undefined, TRAIL_COUNT]} frustumCulled={false}>
+      <sphereGeometry args={[1, 10, 10]} />
+      <meshBasicMaterial
+        color="#e8ff8a"
+        transparent
+        opacity={0.5}
+        depthWrite={false}
+        blending={THREE.AdditiveBlending}
+      />
+    </instancedMesh>
+  );
+}
 
 function DustParticles({ characterRef, isMovingRef, isSkiddingRef }: { characterRef: React.RefObject<THREE.Group>, isMovingRef: React.MutableRefObject<boolean>, isSkiddingRef?: React.MutableRefObject<boolean> }) {
   const PARTICLE_COUNT = 30;

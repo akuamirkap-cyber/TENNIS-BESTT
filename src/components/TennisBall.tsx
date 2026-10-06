@@ -714,11 +714,22 @@ export function TennisBall() {
       ]);
     };
     
+    const handleReset = () => {
+      activeBalls.forEach((b) => {
+        if (b.state.active) {
+          b.state.active = false;
+          b.state.dying = true;
+        }
+      });
+    };
+    
     window.addEventListener('botServeBall', handleBotServe);
     window.addEventListener('tossBall', handleToss);
+    window.addEventListener('resetBalls', handleReset);
     return () => {
       window.removeEventListener('botServeBall', handleBotServe);
       window.removeEventListener('tossBall', handleToss);
+      window.removeEventListener('resetBalls', handleReset);
     };
   }, []);
 

@@ -131,6 +131,19 @@ export const BotCharacter = forwardRef<THREE.Group, any>((props, ref) => {
 
   const fsmState = useRef<'idle' | 'run' | 'windup' | 'swing' | 'followThrough' | 'return'>('idle');
 
+  // --- Swing fluidity: pose blending & recovery (same system as player) ---
+  const blendFromPose = useRef<{ arm: THREE.Euler; torso: THREE.Euler; racket: THREE.Euler } | null>(null);
+  const swingBlendT = useRef(1);
+  const SWING_BLEND_DURATION = 0.09;
+  const chargeBlendFrom = useRef<{ arm: THREE.Euler; torso: THREE.Euler; racket: THREE.Euler } | null>(null);
+  const chargeBlendT = useRef(1);
+  const CHARGE_BLEND_DURATION = 0.15;
+  const lastSwingPose = useRef<{ arm: [number, number, number]; torso: [number, number, number]; racket: [number, number, number] } | null>(null);
+  const recoverTimer = useRef(0);
+  const RECOVER_DURATION = 0.3;
+  const wasSwinging = useRef(false);
+  const wasCharging = useRef(false);
+
   const courtLength = useEditorStore(state => state.courtLength);
 
   useEffect(() => {
@@ -198,6 +211,32 @@ export const BotCharacter = forwardRef<THREE.Group, any>((props, ref) => {
     const courtLength = store.courtLength;
     const delta = Math.min(rawDelta, 0.033) * (store.timeScale || 1.0);
     if (!armRef.current || !torsoRef.current || !racketRef.current || !characterRef.current || !leftLegRef.current || !rightLegRef.current) return;
+
+    // --- Swing fluidity: capture pose on transitions ---
+    if (isSwinging.current && !wasSwinging.current) {
+      blendFromPose.current = {
+        arm: armRef.current.rotation.clone(),
+        torso: torsoRef.current.rotation.clone(),
+        racket: racketRef.current.rotation.clone(),
+      };
+      swingBlendT.current = 0;
+      recoverTimer.current = 0;
+    }
+    wasSwinging.current = isSwinging.current;
+
+    if (chargingRef.current && !wasCharging.current) {
+      chargeBlendFrom.current = {
+        arm: armRef.current.rotation.clone(),
+        torso: torsoRef.current.rotation.clone(),
+        racket: racketRef.current.rotation.clone(),
+      };
+      chargeBlendT.current = 0;
+      recoverTimer.current = 0;
+    }
+    wasCharging.current = chargingRef.current;
+
+    if (swingBlendT.current < 1) swingBlendT.current = Math.min(1, swingBlendT.current + delta / SWING_BLEND_DURATION);
+    if (chargeBlendT.current < 1) chargeBlendT.current = Math.min(1, chargeBlendT.current + delta / CHARGE_BLEND_DURATION);
 
     let moveX = 0;
     let moveZ = 0;
@@ -714,6 +753,14 @@ export const BotCharacter = forwardRef<THREE.Group, any>((props, ref) => {
         isSwinging.current = false;
         isServingRef.current = false;
         hasHitBall.current = false;
+        chargingRef.current = false; // safety: never get stuck charging
+        // --- Fluidity: begin recovery from the current pose ---
+        lastSwingPose.current = {
+          arm: [armRef.current.rotation.x, armRef.current.rotation.y, armRef.current.rotation.z],
+          torso: [torsoRef.current.rotation.x, torsoRef.current.rotation.y, torsoRef.current.rotation.z],
+          racket: [racketRef.current.rotation.x, racketRef.current.rotation.y, racketRef.current.rotation.z],
+        };
+        recoverTimer.current = RECOVER_DURATION;
       }
     }
 
@@ -1007,7 +1054,10 @@ export const BotCharacter = forwardRef<THREE.Group, any>((props, ref) => {
       const baseTorsoY = isMouseSkin ? useEditorStore.getState().mousePartSizes.torsoY : baseLegY + 0.4 * partSizes.torso;
       torsoRef.current.position.y = THREE.MathUtils.lerp(torsoRef.current.position.y, baseTorsoY, 20 * delta);
       
-      targetTorsoRot.x = 0; // No forward lean
+      targetTorsoRot.x = 0; // base — lean added below
+      // Dynamic athletic forward lean proportional to actual movement speed
+      const botRunSpeedNorm = Math.min(1, Math.sqrt(moveX * moveX + moveZ * moveZ));
+      targetTorsoRot.x += botRunSpeedNorm * 0.22;
       
       // Arm swing
       if (!isSwinging.current && t === 0) {
@@ -1150,10 +1200,22 @@ export const BotCharacter = forwardRef<THREE.Group, any>((props, ref) => {
     }
     characterRef.current.userData.lastJump = isJumpingRef.current;
     
-    let lerpSpeed = Math.min(1, 15 * delta);
+    // --- Fluidity: phase-adaptive smoothing (frame-rate independent) ---
+    let lerpRate = 14;
     if (isSwinging.current) {
-      lerpSpeed = 1; // Instant snap for stable speed
+      const phaseT = swingProgress.current;
+      if (phaseT < 0.3) lerpRate = 16;        // windup
+      else if (phaseT < 0.45) lerpRate = 42;  // strike (snappy!)
+      else if (phaseT < 0.75) lerpRate = 24;  // follow-through
+      else lerpRate = 15;                     // return
+    } else if (recoverTimer.current > 0) {
+      lerpRate = 11;                          // gentle settle
+    } else if (chargingRef.current) {
+      lerpRate = 13;
     }
+    let lerpSpeed = 1 - Math.exp(-lerpRate * delta);
+    const racketExtraRate = isSwinging.current && swingProgress.current >= 0.28 && swingProgress.current < 0.5 ? 20 : 6;
+    let racketLerpSpeed = 1 - Math.exp(-(lerpRate + racketExtraRate) * delta);
 
     
     if (isSwinging.current && isServingRef.current) {
@@ -1207,6 +1269,78 @@ export const BotCharacter = forwardRef<THREE.Group, any>((props, ref) => {
         }
     }
     
+    // --- FLUIDITY LAYER: pose blending (same as player) ---
+    if (isSwinging.current && blendFromPose.current) {
+      if (swingBlendT.current < 1) {
+        const e = swingBlendT.current * swingBlendT.current * (3 - 2 * swingBlendT.current);
+        const bp = blendFromPose.current;
+        targetArmRot.set(
+          THREE.MathUtils.lerp(bp.arm.x, targetArmRot.x, e),
+          THREE.MathUtils.lerp(bp.arm.y, targetArmRot.y, e),
+          THREE.MathUtils.lerp(bp.arm.z, targetArmRot.z, e)
+        );
+        targetTorsoRot.set(
+          THREE.MathUtils.lerp(bp.torso.x, targetTorsoRot.x, e),
+          THREE.MathUtils.lerp(bp.torso.y, targetTorsoRot.y, e),
+          THREE.MathUtils.lerp(bp.torso.z, targetTorsoRot.z, e)
+        );
+        targetRacketRot.set(
+          THREE.MathUtils.lerp(bp.racket.x, targetRacketRot.x, e),
+          THREE.MathUtils.lerp(bp.racket.y, targetRacketRot.y, e),
+          THREE.MathUtils.lerp(bp.racket.z, targetRacketRot.z, e)
+        );
+      } else {
+        blendFromPose.current = null;
+      }
+    }
+
+    if (chargingRef.current && !isSwinging.current && chargeBlendFrom.current) {
+      if (chargeBlendT.current < 1) {
+        const e = chargeBlendT.current * chargeBlendT.current * (3 - 2 * chargeBlendT.current);
+        const bp = chargeBlendFrom.current;
+        targetArmRot.set(
+          THREE.MathUtils.lerp(bp.arm.x, targetArmRot.x, e),
+          THREE.MathUtils.lerp(bp.arm.y, targetArmRot.y, e),
+          THREE.MathUtils.lerp(bp.arm.z, targetArmRot.z, e)
+        );
+        targetTorsoRot.set(
+          THREE.MathUtils.lerp(bp.torso.x, targetTorsoRot.x, e),
+          THREE.MathUtils.lerp(bp.torso.y, targetTorsoRot.y, e),
+          THREE.MathUtils.lerp(bp.torso.z, targetTorsoRot.z, e)
+        );
+        targetRacketRot.set(
+          THREE.MathUtils.lerp(bp.racket.x, targetRacketRot.x, e),
+          THREE.MathUtils.lerp(bp.racket.y, targetRacketRot.y, e),
+          THREE.MathUtils.lerp(bp.racket.z, targetRacketRot.z, e)
+        );
+      } else {
+        chargeBlendFrom.current = null;
+      }
+    }
+
+    if (!isSwinging.current && !chargingRef.current && recoverTimer.current > 0 && lastSwingPose.current) {
+      recoverTimer.current -= delta;
+      const p = 1 - Math.max(0, recoverTimer.current) / RECOVER_DURATION;
+      const e = 1 - Math.pow(1 - p, 3);
+      const lp = lastSwingPose.current;
+      targetArmRot.set(
+        THREE.MathUtils.lerp(lp.arm[0], targetArmRot.x, e),
+        THREE.MathUtils.lerp(lp.arm[1], targetArmRot.y, e),
+        THREE.MathUtils.lerp(lp.arm[2], targetArmRot.z, e)
+      );
+      targetTorsoRot.set(
+        THREE.MathUtils.lerp(lp.torso[0], targetTorsoRot.x, e),
+        THREE.MathUtils.lerp(lp.torso[1], targetTorsoRot.y, e),
+        THREE.MathUtils.lerp(lp.torso[2], targetTorsoRot.z, e)
+      );
+      targetRacketRot.set(
+        THREE.MathUtils.lerp(lp.racket[0], targetRacketRot.x, e),
+        THREE.MathUtils.lerp(lp.racket[1], targetRacketRot.y, e),
+        THREE.MathUtils.lerp(lp.racket[2], targetRacketRot.z, e)
+      );
+      if (recoverTimer.current <= 0) lastSwingPose.current = null;
+    }
+
     // Smoothly interpolate current rotation to target rotation
     armRef.current.rotation.x = THREE.MathUtils.lerp(armRef.current.rotation.x, targetArmRot.x, lerpSpeed);
     armRef.current.rotation.y = THREE.MathUtils.lerp(armRef.current.rotation.y, targetArmRot.y, lerpSpeed);
@@ -1227,9 +1361,9 @@ export const BotCharacter = forwardRef<THREE.Group, any>((props, ref) => {
     torsoRef.current.rotation.y = THREE.MathUtils.lerp(torsoRef.current.rotation.y, targetTorsoRot.y, lerpSpeed);
     torsoRef.current.rotation.z = THREE.MathUtils.lerp(torsoRef.current.rotation.z, targetTorsoRot.z, lerpSpeed);
 
-    racketRef.current.rotation.x = THREE.MathUtils.lerp(racketRef.current.rotation.x, targetRacketRot.x, lerpSpeed);
-    racketRef.current.rotation.y = THREE.MathUtils.lerp(racketRef.current.rotation.y, targetRacketRot.y, lerpSpeed);
-    racketRef.current.rotation.z = THREE.MathUtils.lerp(racketRef.current.rotation.z, targetRacketRot.z, lerpSpeed);
+    racketRef.current.rotation.x = THREE.MathUtils.lerp(racketRef.current.rotation.x, targetRacketRot.x, racketLerpSpeed);
+    racketRef.current.rotation.y = THREE.MathUtils.lerp(racketRef.current.rotation.y, targetRacketRot.y, racketLerpSpeed);
+    racketRef.current.rotation.z = THREE.MathUtils.lerp(racketRef.current.rotation.z, targetRacketRot.z, racketLerpSpeed);
 
     // Tossing Logic
     if (tossTimerRef.current > 0) {

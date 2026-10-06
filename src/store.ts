@@ -134,60 +134,88 @@ interface EditorState {
   setSkinType: (skin: 'default' | 'mouse' | 'mumu') => void;
   ballColor: 'yellow' | 'cyan' | 'purple' | 'orange' | 'rainbow';
   setBallColor: (c: 'yellow' | 'cyan' | 'purple' | 'orange' | 'rainbow') => void;
+  gameStarted: boolean;
+  setGameStarted: (b: boolean) => void;
+  resetMatch: () => void;
 }
 
+// Swing keyframes are designed to NEVER pass the racket through the head:
+// windups stay back & wide, contacts happen in front with the arm out,
+// and follow-throughs wrap across at chest height (verified against the
+// character rigs' head volumes — see swing clearance analysis).
 export const anim1KeyframesDefault = [
   {
-    "id": "idle_start",
+    "id": "ready",
     "time": 0,
     "armRot": [0.2, 0, -0.3],
     "torsoRot": [0, 0, 0],
     "racketRot": [1.77, 0, 0]
   },
   {
-    "id": "japgyd",
+    "id": "windup",
     "time": 0.3,
-    "armRot": [ -3.14, -0.04, -0.35 ],
-    "torsoRot": [ 0, 0, 0 ],
-    "racketRot": [ 1.71, 1.4, 0 ]
+    "armRot": [1.05, -0.45, -0.85],
+    "torsoRot": [0, -0.55, 0],
+    "racketRot": [1.35, 0.55, -0.35]
   },
   {
-    "id": "244agb",
+    "id": "contact",
+    "time": 0.6,
+    "armRot": [-0.5, 0.05, -0.5],
+    "torsoRot": [0, 0.25, 0],
+    "racketRot": [1.9, 0.1, -0.05]
+  },
+  {
+    "id": "follow",
     "time": 1,
-    "armRot": [ -0.04, 0.83, -0.35 ],
-    "torsoRot": [ 0, 0, 0 ],
-    "racketRot": [ 2.23, -0.46, 0.06 ]
+    "armRot": [0.45, 0.95, 0.2],
+    "torsoRot": [0, 0.5, 0],
+    "racketRot": [2.25, -0.55, 0.85]
   }
 ];
 
 export const anim2KeyframesDefault = [
   {
-    "id": "idle_start",
+    "id": "ready",
     "time": 0,
     "armRot": [0.2, 0, -0.3],
     "torsoRot": [0, 0, 0],
     "racketRot": [1.77, 0, 0]
   },
   {
-    "id": "66eal9",
-    "time": 0.3,
-    "armRot": [-3.67, -0.25, -0.3],
-    "torsoRot": [-0.3, -0.35, 0],
-    "racketRot": [1.5, -1.44, 0]
+    "id": "load",
+    "time": 0.18,
+    "armRot": [0.7, -0.3, -0.9],
+    "torsoRot": [0, -0.3, 0],
+    "racketRot": [1.5, 0.4, -0.3]
   },
   {
-    "id": "2wuc6s",
-    "time": 0.58,
-    "armRot": [-1.92, 0.26, -0.3],
-    "torsoRot": [0.26, -0.35, 0],
-    "racketRot": [1.89, -0.15, -0.28]
+    "id": "cocked",
+    "time": 0.42,
+    "armRot": [-1.5, -0.1, -0.85],
+    "torsoRot": [0, -0.45, 0],
+    "racketRot": [2.7, 0.3, -0.3]
   },
   {
-    "id": "nrm78l",
+    "id": "contact",
+    "time": 0.6,
+    "armRot": [-1.25, 0, -0.7],
+    "torsoRot": [0, 0.15, 0],
+    "racketRot": [2.3, 0.1, -0.1]
+  },
+  {
+    "id": "descend",
+    "time": 0.8,
+    "armRot": [-0.7, 0.25, -0.85],
+    "torsoRot": [0, 0.35, 0],
+    "racketRot": [1.9, -0.15, 0.15]
+  },
+  {
+    "id": "finish",
     "time": 1,
-    "armRot": [-0.12, 1.5, -0.3],
-    "torsoRot": [0.01, 0.16, 0],
-    "racketRot": [2.69, -0.12, 0.32]
+    "armRot": [0.75, 0.9, 0.15],
+    "torsoRot": [0, 0.55, 0],
+    "racketRot": [2.45, -0.5, 0.6]
   }
 ];
 
@@ -234,19 +262,19 @@ export const anim3KeyframesDefault = [
       "id": "zkc9ej",
       "time": 1,
       "armRot": [
-        -3.93,
-        2.97,
-        1.24
+        -1.15,
+        2.2,
+        0.7
       ],
       "torsoRot": [
         0,
-        0,
+        0.3,
         0
       ],
       "racketRot": [
-        1.98,
-        0.51,
-        0
+        2.3,
+        -0.3,
+        0.4
       ]
     }
 ];
@@ -439,6 +467,18 @@ export const useEditorStore = create<EditorState>((set) => ({
   setHitPowerMultiplier: (h) => set({ hitPowerMultiplier: h }),
   timeScale: 1.0,
   setTimeScale: (s) => set({ timeScale: s }),
+  gameStarted: false,
+  setGameStarted: (b) => set({ gameStarted: b }),
+  resetMatch: () => set({
+      playerPoints: 0,
+      botPoints: 0,
+      playerGames: 0,
+      botGames: 0,
+      playerSets: 0,
+      botSets: 0,
+      isTieBreak: false,
+      serverTurn: 'player',
+  }),
 }));
 
 export const GameState = { };

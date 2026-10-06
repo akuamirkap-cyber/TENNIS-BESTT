@@ -1,6 +1,6 @@
 import { Suspense, useState, useRef, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Environment, ContactShadows, useTexture } from '@react-three/drei';
+import { Environment, useTexture } from '@react-three/drei';
 import * as THREE from 'three';
 import { TennisCharacter } from './components/TennisCharacter';
 import { TennisBall } from './components/TennisBall';
@@ -14,6 +14,8 @@ import { CharacterSizeEditor } from './components/CharacterSizeEditor';
 import { PhysicsEditor } from './components/PhysicsEditor';
 import { ArcadeTextOverlay } from './components/ArcadeTextOverlay';
 import { CameraSetupModal } from './components/CameraSetupModal';
+import { MainMenu } from './components/MainMenu';
+import { ScoreBoard, ChargeGauge, ServePowerGauge, ActionButtons, TopBar } from './components/HUD';
 import { audioManager } from './utils/audio';
 import { useEditorStore } from './store';
 
@@ -68,24 +70,6 @@ const DynamicEnvironment = ({ themeConfig, useEnvGround, envRadius, envHeight, e
   }
 };
 
-function PowerGauge() {
-  return (
-    <div id="serve-power-container" className="absolute bottom-32 left-1/2 -translate-x-1/2 flex flex-col items-center z-30 hidden pointer-events-none transition-opacity duration-300">
-      <div className="text-white font-bold text-xl drop-shadow-md mb-2 tracking-widest uppercase">Serve Power</div>
-      <div className="w-64 h-6 bg-gray-900/80 rounded-full border-2 border-white/50 overflow-hidden relative shadow-[0_0_15px_rgba(0,0,0,0.5)]">
-        {/* Zones */}
-        <div className="absolute top-0 bottom-0 left-0 w-[40%] bg-red-500/50"></div>
-        <div className="absolute top-0 bottom-0 left-[40%] w-[45%] bg-yellow-500/50"></div>
-        <div className="absolute top-0 bottom-0 left-[85%] right-0 bg-green-500/70"></div>
-        <div className="absolute top-0 bottom-0 left-[85%] w-1 bg-white z-10 shadow-[0_0_5px_white]"></div>
-        
-        {/* Moving Bar */}
-        <div id="serve-power-bar" className="h-full w-0 bg-white shadow-[0_0_10px_white] transition-none rounded-r-full relative z-20"></div>
-      </div>
-    </div>
-  );
-}
-
 function CameraController({ mode, characterRef, settings, gameMode, stumbleCamera, tennisCamera, camConfig }: { mode: 'orbit' | 'game', characterRef: React.RefObject<THREE.Group | null>, settings: any, gameMode: string, stumbleCamera?: string, tennisCamera?: string, camConfig?: any }) {
   const { camera } = useThree();
   const cameraShake = useEditorStore((state) => state.cameraShake);
@@ -100,12 +84,10 @@ function CameraController({ mode, characterRef, settings, gameMode, stumbleCamer
     }
 
     // Auto recover timeScale for smooth freeze effect
-    // We use a fixed unscaled delta for this because timeScale itself affects delta in game logic
-    const unscaledDelta = Math.min(0.05, 1.0 / 30.0); // Rough estimate of unscaled delta
+    const unscaledDelta = Math.min(0.05, 1.0 / 30.0);
     const timeScale = useEditorStore.getState().timeScale;
     if (timeScale < 1.0) {
-       // Recover to 1.0 smoothly
-       const nextTimeScale = Math.min(1.0, timeScale + unscaledDelta * 2.5); // recovers in ~0.4s
+       const nextTimeScale = Math.min(1.0, timeScale + unscaledDelta * 2.5);
        useEditorStore.getState().setTimeScale(nextTimeScale);
     }
 
@@ -130,15 +112,13 @@ function CameraController({ mode, characterRef, settings, gameMode, stumbleCamer
             } else {
                 // Character natively faces +Z
                 const charForward = new THREE.Vector3(0, 0, 1).applyQuaternion(characterRef.current.quaternion);
-                charForward.y = 0; // Keep it horizontal so camera doesn't dip when character leans
+                charForward.y = 0;
                 charForward.normalize();
                 
-                // If smoothed forward is exactly opposite, lerp will get stuck at 0. Add a small offset to prevent this.
                 if (smoothedForwardRef.current.dot(charForward) < -0.99) {
                     smoothedForwardRef.current.add(new THREE.Vector3(0.01, 0, 0.01)).normalize();
                 }
                 
-                // Smoothly interpolate the forward direction so the camera doesn't snap to head rotation
                 smoothedForwardRef.current.lerp(charForward, 10.0 * delta).normalize();
                 
                 const forward = smoothedForwardRef.current;
@@ -146,11 +126,9 @@ function CameraController({ mode, characterRef, settings, gameMode, stumbleCamer
                 const distance = camConfig?.stumbleGtaDistance || 3.0;
                 const height = camConfig?.stumbleGtaHeight || 2.0;
                 
-                // Position camera BEHIND the character (subtract forward vector)
                 targetPos.copy(charPos).addScaledVector(forward, -distance);
                 targetPos.y += height;
                 
-                // Look ahead of the character (add forward vector)
                 const lookDist = camConfig?.stumbleGtaLookDist || 5.5;
                 lookAtPos.copy(charPos).addScaledVector(forward, lookDist);
                 lookAtPos.y += (camConfig?.stumbleGtaLookY || -0.5);
@@ -167,10 +145,9 @@ function CameraController({ mode, characterRef, settings, gameMode, stumbleCamer
         }
       }
       
-      // pure lerp to targetPos (without shake)
       const lerpFactorPos = 1.0 - Math.pow(0.001, delta);
       if (isGtaCam && gameMode === 'stumble') {
-         camera.position.lerp(targetPos, 1.0 - Math.exp(-25.0 * delta)); // Frame-rate independent fast follow
+         camera.position.lerp(targetPos, 1.0 - Math.exp(-25.0 * delta));
       } else {
          camera.position.lerp(targetPos, lerpFactorPos);
       }
@@ -182,24 +159,19 @@ function CameraController({ mode, characterRef, settings, gameMode, stumbleCamer
       
       const lerpFactorRot = 1.0 - Math.pow(0.00001, delta);
       if (isGtaCam && gameMode === 'stumble') {
-          // Frame-rate independent rotation to follow character snappily
           camera.quaternion.slerp(targetQuat, 1.0 - Math.exp(-20.0 * delta));
       } else {
           camera.quaternion.slerp(targetQuat, lerpFactorRot);
       }
       
-      // Add camera shake directly to position (post-lerp) so it isn't smoothed out
       if (cameraShake > 0) {
-        const shakeMag = cameraShake * 0.2; // Less magnitude needed because it's not damped by lerp
-        // Use unscaled elapsedTime so shake speed is consistent even during timeScale freeze
+        const shakeMag = cameraShake * 0.2;
         const t = performance.now() * 0.03 + seedRef.current * 100.0;
         
-        // Random-looking shake using overlapping sine waves
         const shakeX = (Math.sin(t) + Math.sin(t * 1.5)) * shakeMag;
         const shakeY = (Math.cos(t * 1.2) + Math.cos(t * 2.1)) * shakeMag;
         const shakeZ = (Math.sin(t * 0.8) + Math.sin(t * 1.8)) * shakeMag;
         
-        // Temporarily store base pos so next frame's lerp starts from the real position
         if (!state.scene.userData.baseCamPos) {
            state.scene.userData.baseCamPos = new THREE.Vector3();
         }
@@ -225,22 +197,80 @@ function CameraController({ mode, characterRef, settings, gameMode, stumbleCamer
   return null;
 }
 
-import { StumbleGuysLevel } from './components/StumbleGuysLevel';
-
 export default function App() {
   const audioRef = useRef<HTMLAudioElement>(null);
   
+  const [screen, setScreen] = useState<'menu' | 'game'>('menu');
+  const [sfxOn, setSfxOn] = useState(true);
+  const [musicOn, setMusicOn] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
   useEffect(() => {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.getVoices();
     }
-    if (audioRef.current) {
-      audioRef.current.volume = 0.5;
-    }
   }, []);
 
+  // Menu / attract mode management
+  useEffect(() => {
+    if (screen === 'menu') {
+      const store = useEditorStore.getState();
+      store.setGameStarted(false);
+      store.setIsAutoPlay(true); // attract mode: match plays itself behind the menu
+      audioManager.setMuted(true);
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+    }
+  }, [screen]);
+
+  const handlePlay = () => {
+    const store = useEditorStore.getState();
+    window.dispatchEvent(new CustomEvent('resetBalls'));
+    store.resetMatch();
+    store.setServerTurn('player');
+    store.setGameMode('tennis');
+    store.setIsAutoPlay(false);
+    store.setGameStarted(true);
+    // Follow whatever sound choice was made in the menu
+    setSfxOn(!audioManager.muted);
+    audioManager.setMuted(audioManager.muted);
+    setScreen('game');
+  };
+
+  const handleExitToMenu = () => {
+    window.dispatchEvent(new CustomEvent('resetBalls'));
+    const store = useEditorStore.getState();
+    store.setGameStarted(false);
+    store.resetMatch();
+    store.setIsAutoPlay(true);
+    audioManager.setMuted(true);
+    setMusicOn(false);
+    setScreen('menu');
+  };
+
+  const toggleSfx = () => {
+    setSfxOn((s) => {
+      audioManager.setMuted(!s ? false : true);
+      return !s;
+    });
+  };
+
+  const toggleMusic = () => {
+    setMusicOn((m) => {
+      const next = !m;
+      if (audioRef.current) {
+        audioRef.current.muted = !next;
+        audioRef.current.volume = 0.35;
+        if (next) {
+          audioRef.current.play().catch(() => {});
+        }
+      }
+      return next;
+    });
+  };
+
   const [cameraMode, setCameraMode] = useState<'orbit' | 'game'>('game');
-  const [stumbleCamera, setStumbleCamera] = useState<'default' | 'gta'>('gta');
   const courtLength = useEditorStore(state => state.courtLength);
   const [camConfig, setCamConfig] = useState({
     tennisGtaTargetY: 3.1,
@@ -259,7 +289,6 @@ export default function App() {
   const [tennisCamera, setTennisCamera] = useState<'broadcast' | 'gta'>('gta');
   const [showUI, setShowUI] = useState(false);
   const [showCameraSetup, setShowCameraSetup] = useState(false);
-  const [faultMessage, setFaultMessage] = useState<string | null>(null);
   const [environmentTheme, setEnvironmentTheme] = useState<'forest' | 'forest_jpg' | 'snow' | 'beach' | 'park' | 'africa' | 'waterfall' | 'waterfall2'>('beach');
   const [envRadius, setEnvRadius] = useState(103);
   const [envHeight, setEnvHeight] = useState(11);
@@ -338,8 +367,9 @@ export default function App() {
     lookZ: 0
   });
   const characterRef = useRef<THREE.Group>(null);
-  const { playerPoints, botPoints, playerGames, botGames, playerSets, botSets, isTieBreak, serverTurn, activeBallsCount, isAutoPlay, setIsAutoPlay, isAutoHit, setIsAutoHit, showTrail, setShowTrail, gameMode, setGameMode, isRecordingStumble, stumbleRecordingData } = useEditorStore();
-  
+  const { playerPoints, botPoints, playerGames, botGames, isTieBreak, serverTurn, gameMode } = useEditorStore();
+  const courtTheme = useEditorStore(state => state.courtTheme);
+
   const getTennisScore = (p: number, b: number, isTieBreak: boolean) => {
     if (isTieBreak) return `${p}`; 
     if (p >= 3 && b >= 3) {
@@ -350,11 +380,10 @@ export default function App() {
     const scores = ['0', '15', '30', '40'];
     return scores[p] || '40';
   };
-  const pDisplay = getTennisScore(playerPoints, botPoints, isTieBreak);
-  const bDisplay = getTennisScore(botPoints, playerPoints, isTieBreak);
 
   useEffect(() => {
     if (playerPoints === 0 && botPoints === 0 && playerGames === 0 && botGames === 0) return;
+    if (!useEditorStore.getState().gameStarted) return;
     
     if (playerPoints === 0 && botPoints === 0 && (playerGames > 0 || botGames > 0)) {
        audioManager.playCrowd('applause');
@@ -377,12 +406,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [environmentTheme]);
 
-  const [isUICollapsed, setIsUICollapsed] = useState(false);
-  const courtTheme = useEditorStore(state => state.courtTheme);
-  const ballColor = useEditorStore(state => state.ballColor);
-
-  const [isMuted, setIsMuted] = useState(true);
-
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === 'h') {
@@ -399,7 +422,14 @@ export default function App() {
         store.setSkinType(store.skinType === 'default' ? 'mouse' : (store.skinType === 'mouse' ? 'mumu' : 'default'));
       }
       if (e.key.toLowerCase() === 'v') {
-        setIsMuted(prev => !prev);
+        // Master mute: SFX + music
+        const next = audioManager.muted;
+        audioManager.setMuted(!next);
+        setSfxOn(next);
+        if (!next) {
+          setMusicOn(false);
+          if (audioRef.current) audioRef.current.muted = true;
+        }
       }
     };
     
@@ -410,7 +440,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="w-full h-screen bg-gradient-to-b from-blue-400 via-sky-200 to-orange-100 relative overflow-hidden font-sans">
+    <div className="w-full h-screen bg-gradient-to-b from-blue-400 via-sky-200 to-orange-100 relative overflow-hidden font-hyper">
       <div className="absolute inset-0 z-0">
         <Canvas shadows camera={{ position: [0, 8, 19.5], fov: 45 }}>
           <color attach="background" args={[envConfig[environmentTheme].fogColor]} />
@@ -445,49 +475,52 @@ export default function App() {
               characterRef={characterRef} 
               settings={cameraSettings} 
               gameMode={gameMode}
-              stumbleCamera={stumbleCamera}
               tennisCamera={tennisCamera}
               camConfig={camConfig}
             />
-            {gameMode === 'tennis' && (
-              <>
-                <TennisCourt theme={courtTheme} />
-                <Referee position={[6.2, 0, 0]} />
-                <TennisCharacter ref={characterRef} />
-                <TennisBall />
-                <HitParticles />
-              </>
-            )}
-            {gameMode === 'stumble' && (
-              <>
-                <StumbleGuysLevel />
-                <TennisCharacter ref={characterRef} />
-              </>
-            )}
+            <TennisCourt theme={courtTheme} />
+            <Referee position={[6.2, 0, 0]} />
+            <TennisCharacter ref={characterRef} />
+            <TennisBall />
+            <HitParticles />
           </Suspense>
         </Canvas>
       </div>
-      <audio ref={audioRef} src="/Sandy Flip Loop.mp3" autoPlay loop muted={isMuted} />
+      <audio ref={audioRef} src="/Sandy Flip Loop.mp3" loop muted={!musicOn} />
+      
+      {screen === 'menu' && <MainMenu onPlay={handlePlay} />}
+
+      {screen === 'game' && (
+        <>
+          <ArcadeTextOverlay />
+          <Joystick />
+          <ActionButtons />
+          <ChargeGauge />
+          <ServePowerGauge />
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[900]">
+            <ScoreBoard />
+          </div>
+          <TopBar
+            onExitToMenu={handleExitToMenu}
+            sfxOn={sfxOn}
+            onToggleSfx={toggleSfx}
+            musicOn={musicOn}
+            onToggleMusic={toggleMusic}
+            onOpenAdvanced={() => setAdvancedOpen(true)}
+            tennisCamera={tennisCamera}
+            onTennisCamera={setTennisCamera}
+          />
+        </>
+      )}
+
+      {/* Hidden dev editors (toggle with H) */}
       {showUI && (
         <>
           <AnimationEditor />
           <CameraEditor settings={cameraSettings} onChange={setCameraSettings} />
-          
         </>
       )}
-      <PowerGauge />
-      <ArcadeTextOverlay />
-      <Joystick />
       
-      {/* Camera Setup Toggle Button */}
-      <button 
-        onClick={() => setShowCameraSetup(true)}
-        className="absolute bottom-4 right-4 z-50 bg-white/20 hover:bg-white/40 backdrop-blur text-white p-3 rounded-full shadow-lg border border-white/30 flex items-center justify-center transition-all"
-        title="Camera Setup"
-      >
-        🎥
-      </button>
-
       <CameraSetupModal 
         isOpen={showCameraSetup} 
         onClose={() => setShowCameraSetup(false)} 
@@ -495,39 +528,26 @@ export default function App() {
         setCamConfig={setCamConfig} 
         gameMode={gameMode}
       />
-      {gameMode === 'tennis' && (
-        <div className="absolute top-4 left-4 z-50 pointer-events-none transform scale-[0.65] origin-top-left">
-          <div className="flex flex-col gap-1 backdrop-blur-md rounded p-2 text-xs shadow-xl min-w-[200px] bg-black/30 border border-white/10">
-             <div className="flex justify-between text-white font-bold mb-1 border-b border-white/40 pb-1">
-                <span className="w-14"></span>
-                <span className="w-6 text-center text-white/80">SET</span>
-                <span className="w-6 text-center text-white/80">GMS</span>
-                <span className="w-8 text-center text-green-400">PTS</span>
-             </div>
-             <div className="flex justify-between items-center text-white font-bold">
-                <span className="w-14 truncate drop-shadow-md">YOU {serverTurn === 'player' ? '🎾' : ''}</span>
-                <span className="w-6 text-center bg-blue-500/80 rounded shadow">{playerSets}</span>
-                <span className="w-6 text-center bg-blue-500/80 rounded shadow">{playerGames}</span>
-                <span className="w-8 text-center bg-blue-600 rounded py-0.5 shadow">{pDisplay}</span>
-             </div>
-             <div className="flex justify-between items-center text-white font-bold mt-1">
-                <span className="w-14 text-red-100 drop-shadow-md truncate">BOT {serverTurn === 'bot' ? '🎾' : ''}</span>
-                <span className="w-6 text-center bg-red-500/80 rounded shadow">{botSets}</span>
-                <span className="w-6 text-center bg-red-500/80 rounded shadow">{botGames}</span>
-                <span className="w-8 text-center bg-red-600 rounded py-0.5 shadow">{bDisplay}</span>
-             </div>
-          </div>
-        </div>
-      )}
-      
-      
-      {/* Overlay UI Sidebar */}
-      <div className={`absolute top-0 right-0 h-full transition-transform duration-300 z-40 flex items-start ${isUICollapsed ? 'translate-x-full' : 'translate-x-0'}`}>
-        <div className="w-[360px] max-h-screen overflow-y-auto bg-black/60 backdrop-blur-md border-l border-white/20 shadow-2xl p-4 flex flex-col gap-4 pointer-events-auto">
-          
-          {/* Game Controls */}
 
-            <div className="flex flex-col gap-1 mt-2 text-xs text-white/80 bg-black/40 p-2 rounded">
+      {/* Advanced editor drawer */}
+      {advancedOpen && (
+        <>
+          <div 
+            className="absolute inset-0 bg-black/40 z-[1200]" 
+            onClick={() => setAdvancedOpen(false)} 
+          />
+          <div className="absolute top-0 right-0 h-full w-[360px] max-h-screen overflow-y-auto bg-black/70 backdrop-blur-md border-l border-white/20 shadow-2xl p-4 flex flex-col gap-4 z-[1250] animate-hc-slide-up">
+            <div className="flex items-center justify-between">
+              <h2 className="text-white font-extrabold text-lg tracking-wide">🛠️ ADVANCED</h2>
+              <button 
+                onClick={() => setAdvancedOpen(false)}
+                className="w-9 h-9 rounded-full bg-white/20 hover:bg-white/40 text-white font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-1 text-xs text-white/80 bg-black/40 p-2 rounded">
               <div className="font-bold text-white mb-1 border-b border-white/20 pb-1">Keyboard Controls</div>
               <div><kbd className="bg-white/20 px-1 rounded">W/A/S/D</kbd> : Move & Aim</div>
               <div><kbd className="bg-white/20 px-1 rounded">SPACE</kbd> : Toss / Jump</div>
@@ -537,203 +557,124 @@ export default function App() {
               <div><kbd className="bg-white/20 px-1 rounded">L</kbd> : Lob (High Arc)</div>
               <div><kbd className="bg-white/20 px-1 rounded">M</kbd> : Smash (Matrix Slow-Mo)</div>
             </div>
-          <div className="flex flex-col gap-2">
-            <h3 className="text-white font-bold border-b border-white/20 pb-1">Game Controls</h3>
-            
-            
-            <div className="flex gap-2 flex-wrap">
-              {gameMode === 'tennis' && (
-                <>
-                  <button onClick={() => setIsAutoPlay(!isAutoPlay)} className={`flex-1 font-bold text-xs px-2 py-1 rounded ${isAutoPlay ? 'bg-purple-600 text-white' : 'bg-white/20 text-white hover:bg-white/30'}`}>
-                    AUTO PLAY: {isAutoPlay ? 'ON' : 'OFF'}
-                  </button>
-                  <button onClick={() => setIsAutoHit(!isAutoHit)} className={`flex-1 font-bold text-xs px-2 py-1 rounded ${isAutoHit ? 'bg-orange-500 text-white' : 'bg-white/20 text-white hover:bg-white/30'}`}>
-                    AUTO HIT: {isAutoHit ? 'ON' : 'OFF'}
-                  </button>
-                </>
-              )}
+
+            <div className="flex flex-col gap-2">
+              <h3 className="text-white font-bold border-b border-white/20 pb-1">Game Controls</h3>
+              <div className="flex gap-2 flex-wrap">
+                {gameMode === 'tennis' && (
+                  <>
+                    <button onClick={() => useEditorStore.getState().setIsAutoHit(!useEditorStore.getState().isAutoHit)} className={`flex-1 font-bold text-xs px-2 py-1 rounded ${useEditorStore.getState().isAutoHit ? 'bg-orange-500 text-white' : 'bg-white/20 text-white hover:bg-white/30'}`}>
+                      AUTO HIT: {useEditorStore.getState().isAutoHit ? 'ON' : 'OFF'}
+                    </button>
+                    <button 
+                      onClick={() => setShowCameraSetup(true)}
+                      className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-1 px-2 rounded text-xs"
+                    >
+                      🎥 CAMERA TUNING
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
-            <div className="flex gap-2">
-              <button 
-                onClick={() => gameMode === 'stumble' ? setStumbleCamera(prev => prev === 'default' ? 'gta' : 'default') : setTennisCamera(prev => prev === 'broadcast' ? 'gta' : 'broadcast')}
-                className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-1 px-2 rounded text-xs"
-              >
-                CAM: {gameMode === 'stumble' ? stumbleCamera.toUpperCase() : tennisCamera.toUpperCase()}
-              </button>
+
+            {/* Environment */}
+            <div className="flex flex-col gap-2">
+              <h3 className="text-white font-bold border-b border-white/20 pb-1">Environment Theme</h3>
+              <div className="grid grid-cols-2 gap-2">
+                {['forest', 'forest_jpg', 'snow', 'beach', 'park', 'africa', 'waterfall', 'waterfall2'].map(theme => (
+                  <button 
+                    key={theme}
+                    onClick={(e) => { e.stopPropagation(); setEnvironmentTheme(theme as any); }}
+                    className={`font-bold py-1 px-2 rounded text-xs ${environmentTheme === theme ? 'bg-green-500 text-white' : 'bg-white/20 text-white hover:bg-white/30'}`}
+                  >
+                    {theme.charAt(0).toUpperCase() + theme.slice(1).replace('_', ' ')}
+                  </button>
+                ))}
+              </div>
               
-              {gameMode === 'tennis' && (
-                <button 
-                  onClick={() => {
-                    const store = useEditorStore.getState();
-                    const nextTheme = store.courtTheme === 'grass' ? 'hard' : store.courtTheme === 'hard' ? 'clay' : 'grass';
-                    store.setCourtTheme(nextTheme);
-                  }}
-                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1 px-2 rounded text-xs"
-                >
-                  COURT: {courtTheme.toUpperCase()}
-                </button>
-              )}
-              {gameMode === 'tennis' && (
-                <button 
-                  onClick={() => {
-                    const store = useEditorStore.getState();
-                    const colors = ["yellow", "cyan", "purple", "orange", "rainbow"] as const;
-                    const currentIdx = colors.indexOf(store.ballColor);
-                    store.setBallColor(colors[(currentIdx + 1) % colors.length]);
-                  }}
-                  className="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded text-xs"
-                >
-                  BALL: {ballColor.toUpperCase()}
-                </button>
-              )}
+              <div className="flex flex-col gap-2 mt-2 bg-black/20 p-2 rounded">
+                <label className="flex items-center gap-2 text-white text-xs font-bold cursor-pointer">
+                  <input type="checkbox" checked={useEnvGround} onChange={(e) => setUseEnvGround(e.target.checked)} />
+                  Enable Ground Projection
+                </label>
+                
+                {useEnvGround && (
+                  <>
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between text-xs text-white">
+                        <span>Radius</span>
+                        <span>{envRadius}</span>
+                      </div>
+                      <input type="range" min="10" max="500" value={envRadius} onChange={(e) => setEnvRadius(Number(e.target.value))} />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between text-xs text-white">
+                        <span>Height</span>
+                        <span>{envHeight}</span>
+                      </div>
+                      <input type="range" min="1" max="100" value={envHeight} onChange={(e) => setEnvHeight(Number(e.target.value))} />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between text-xs text-white">
+                        <span>Scale</span>
+                        <span>{envScale}</span>
+                      </div>
+                      <input type="range" min="10" max="1000" value={envScale} onChange={(e) => setEnvScale(Number(e.target.value))} />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between text-xs text-white">
+                        <span>Pos X</span>
+                        <span>{envPosX}</span>
+                      </div>
+                      <input type="range" min="-100" max="100" step="0.1" value={envPosX} onChange={(e) => setEnvPosX(Number(e.target.value))} />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between text-xs text-white">
+                        <span>Pos Y</span>
+                        <span>{envPosY}</span>
+                      </div>
+                      <input type="range" min="-50" max="50" step="0.1" value={envPosY} onChange={(e) => setEnvPosY(Number(e.target.value))} />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between text-xs text-white">
+                        <span>Pos Z</span>
+                        <span>{envPosZ}</span>
+                      </div>
+                      <input type="range" min="-100" max="100" step="0.1" value={envPosZ} onChange={(e) => setEnvPosZ(Number(e.target.value))} />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between text-xs text-white">
+                        <span>Rotation</span>
+                        <span>{envRotY.toFixed(2)}</span>
+                      </div>
+                      <input type="range" min="0" max="6.28" step="0.01" value={envRotY} onChange={(e) => setEnvRotY(Number(e.target.value))} />
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
-            {gameMode === 'tennis' && (
-              <div className="mt-2 flex items-center justify-between">
-                  <label className="text-white text-xs font-bold">Court Length: {courtLength.toFixed(1)}m</label>
-                  <input 
-                      type="range" 
-                      min="12.0" max="30.0" step="0.5" 
-                      value={courtLength}
-                      onChange={(e) => useEditorStore.getState().setCourtLength(parseFloat(e.target.value))}
-                      className="w-1/2"
-                  />
+
+            <PhysicsEditor />
+
+            {showUI && (
+              <div className="flex flex-col gap-4 mt-2 border-t border-white/20 pt-4">
+                <CharacterSizeEditor />
+                <div className="flex flex-col gap-2">
+                  <h3 className="text-white font-bold">Animations</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => window.dispatchEvent(new CustomEvent('playAnim', { detail: 'swing' }))} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-2 rounded text-xs">Play Swing</button>
+                    <button onClick={() => window.dispatchEvent(new CustomEvent('playAnim', { detail: 'anim1' }))} className="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-2 rounded text-xs">Anim 1</button>
+                    <button onClick={() => window.dispatchEvent(new CustomEvent('playAnim', { detail: 'anim2' }))} className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-1 px-2 rounded text-xs">Anim 2</button>
+                    <button onClick={() => setCameraMode(prev => prev === 'orbit' ? 'game' : 'orbit')} className="bg-gray-800 hover:bg-gray-900 text-white font-bold py-1 px-2 rounded text-xs">
+                      {cameraMode === 'orbit' ? 'Game View' : 'Orbit View'}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
-
-          {/* Environment */}
-          <div className="flex flex-col gap-2">
-            <h3 className="text-white font-bold border-b border-white/20 pb-1">Environment Theme</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {['forest', 'forest_jpg', 'snow', 'beach', 'park', 'africa', 'waterfall', 'waterfall2'].map(theme => (
-                <button 
-                  key={theme}
-                  onClick={(e) => { e.stopPropagation(); setEnvironmentTheme(theme as any); }}
-                  className={`font-bold py-1 px-2 rounded text-xs ${environmentTheme === theme ? 'bg-green-500 text-white' : 'bg-white/20 text-white hover:bg-white/30'}`}
-                >
-                  {theme.charAt(0).toUpperCase() + theme.slice(1).replace('_', ' ')}
-                </button>
-              ))}
-            </div>
-            
-            <div className="flex flex-col gap-2 mt-2 bg-black/20 p-2 rounded">
-              <label className="flex items-center gap-2 text-white text-xs font-bold cursor-pointer">
-                <input type="checkbox" checked={useEnvGround} onChange={(e) => setUseEnvGround(e.target.checked)} />
-                Enable Ground Projection
-              </label>
-              
-              {useEnvGround && (
-                <>
-                  <div className="flex flex-col gap-1">
-                    <div className="flex justify-between text-xs text-white">
-                      <span>Radius</span>
-                      <span>{envRadius}</span>
-                    </div>
-                    <input type="range" min="10" max="500" value={envRadius} onChange={(e) => setEnvRadius(Number(e.target.value))} />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <div className="flex justify-between text-xs text-white">
-                      <span>Height</span>
-                      <span>{envHeight}</span>
-                    </div>
-                    <input type="range" min="1" max="100" value={envHeight} onChange={(e) => setEnvHeight(Number(e.target.value))} />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <div className="flex justify-between text-xs text-white">
-                      <span>Scale</span>
-                      <span>{envScale}</span>
-                    </div>
-                    <input type="range" min="10" max="1000" value={envScale} onChange={(e) => setEnvScale(Number(e.target.value))} />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <div className="flex justify-between text-xs text-white">
-                      <span>Pos X</span>
-                      <span>{envPosX}</span>
-                    </div>
-                    <input type="range" min="-100" max="100" step="0.1" value={envPosX} onChange={(e) => setEnvPosX(Number(e.target.value))} />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <div className="flex justify-between text-xs text-white">
-                      <span>Pos Y</span>
-                      <span>{envPosY}</span>
-                    </div>
-                    <input type="range" min="-50" max="50" step="0.1" value={envPosY} onChange={(e) => setEnvPosY(Number(e.target.value))} />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <div className="flex justify-between text-xs text-white">
-                      <span>Pos Z</span>
-                      <span>{envPosZ}</span>
-                    </div>
-                    <input type="range" min="-100" max="100" step="0.1" value={envPosZ} onChange={(e) => setEnvPosZ(Number(e.target.value))} />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <div className="flex justify-between text-xs text-white">
-                      <span>Rotation</span>
-                      <span>{envRotY.toFixed(2)}</span>
-                    </div>
-                    <input type="range" min="0" max="6.28" step="0.01" value={envRotY} onChange={(e) => setEnvRotY(Number(e.target.value))} />
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          <PhysicsEditor />
-
-          {showUI && (
-            <div className="flex flex-col gap-4 mt-2 border-t border-white/20 pt-4">
-              <CharacterSizeEditor />
-              <div className="flex flex-col gap-2">
-                <h3 className="text-white font-bold">Animations</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => window.dispatchEvent(new CustomEvent('playAnim', { detail: 'swing' }))} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-2 rounded text-xs">Play Swing</button>
-                  <button onClick={() => window.dispatchEvent(new CustomEvent('playAnim', { detail: 'anim1' }))} className="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-2 rounded text-xs">Anim 1</button>
-                  <button onClick={() => window.dispatchEvent(new CustomEvent('playAnim', { detail: 'anim2' }))} className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-1 px-2 rounded text-xs">Anim 2</button>
-                  <button onClick={() => setCameraMode(prev => prev === 'orbit' ? 'game' : 'orbit')} className="bg-gray-800 hover:bg-gray-900 text-white font-bold py-1 px-2 rounded text-xs">
-                    {cameraMode === 'orbit' ? 'Game View' : 'Orbit View'}
-                  </button>
-                </div>
-              </div>
-              
-              <div className="flex flex-col gap-2 mt-4">
-                <h3 className="font-bold mb-2 text-white border-b border-white/20 pb-1">Camera Tuning</h3>
-                <div className="text-white text-xs">
-                  {Object.keys(camConfig).map(key => (
-                    <div key={key} className="mb-2">
-                      <label className="block mb-1">{key}: {camConfig[key as keyof typeof camConfig].toFixed(1)}</label>
-                      <input 
-                        type="range" 
-                        min="-20" max="20" step="0.5" 
-                        value={camConfig[key as keyof typeof camConfig]} 
-                        onChange={(e) => setCamConfig(prev => ({...prev, [key]: parseFloat(e.target.value)}))} 
-                        className="w-full"
-                      />
-                    </div>
-                  ))}
-                  <button 
-                    className="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-2 rounded text-xs"
-                    onClick={() => {
-                      navigator.clipboard.writeText(JSON.stringify(camConfig, null, 2));
-                      alert('Copied to clipboard!');
-                    }}
-                  >
-                    COPY JSON
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-        </div>
-      </div>
-      
-      {/* Toggle Button */}
-      <button 
-        onClick={() => setIsUICollapsed(prev => !prev)}
-        className={`absolute top-1/2 -translate-y-1/2 right-0 transition-transform duration-300 z-50 bg-black/60 text-white p-2 rounded-l-xl border-l border-t border-b border-white/20 shadow-2xl flex items-center justify-center hover:bg-black/80 ${isUICollapsed ? 'translate-x-0' : '-translate-x-[360px]'}`}
-      >
-        <span className="font-bold text-xl">{isUICollapsed ? '◀' : '▶'}</span>
-      </button>
+        </>
+      )}
     </div>
   );
 }

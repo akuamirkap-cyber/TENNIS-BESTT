@@ -1,0 +1,46 @@
+            <div className="flex gap-2 flex-wrap">
+              {gameMode === 'tennis' && (
+                <>
+                  <button onClick={() => setIsAutoPlay(!isAutoPlay)} className={`flex-1 font-bold text-xs px-2 py-1 rounded ${isAutoPlay ? 'bg-purple-600 text-white' : 'bg-white/20 text-white hover:bg-white/30'}`}>
+                    AUTO PLAY: {isAutoPlay ? 'ON' : 'OFF'}
+                  </button>
+                  <button onClick={() => setIsAutoHit(!isAutoHit)} className={`flex-1 font-bold text-xs px-2 py-1 rounded ${isAutoHit ? 'bg-orange-500 text-white' : 'bg-white/20 text-white hover:bg-white/30'}`}>
+                    AUTO HIT: {isAutoHit ? 'ON' : 'OFF'}
+                  </button>
+                </>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => gameMode === 'stumble' ? setStumbleCamera(prev => prev === 'default' ? 'gta' : 'default') : setTennisCamera(prev => prev === 'broadcast' ? 'gta' : 'broadcast')}
+                className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-1 px-2 rounded text-xs"
+              >
+                CAM: {gameMode === 'stumble' ? stumbleCamera.toUpperCase() : tennisCamera.toUpperCase()}
+              </button>
+              
+              {gameMode === 'tennis' && (
+                <button 
+                  onClick={() => {
+                    const store = useEditorStore.getState();
+                    const nextTheme = store.courtTheme === 'grass' ? 'hard' : store.courtTheme === 'hard' ? 'clay' : 'grass';
+                    store.setCourtTheme(nextTheme);
+                  }}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1 px-2 rounded text-xs"
+                >
+                  COURT: {courtTheme.toUpperCase()}
+                </button>
+              )}
+              {gameMode === 'tennis' && (
+                <button 
+                  onClick={() => {
+                    const store = useEditorStore.getState();
+                    const colors = ["yellow", "cyan", "purple", "orange", "rainbow"];
+                    const currentIdx = colors.indexOf(store.ballColor);
+                    store.setBallColor(colors[(currentIdx + 1) % colors.length]);
+                  }}
+                  className="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded text-xs"
+                >
+                  BALL: {ballColor.toUpperCase()}
+                </button>
+              )}
+            </div>

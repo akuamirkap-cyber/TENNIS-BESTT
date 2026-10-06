@@ -1450,6 +1450,13 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
             characterRef.current.position.z += -1 * delta * 4; // Step into the ball
         }
         
+        // Left arm counterbalance: swings back & out while the right arm strikes,
+        // so the body reads as one coiled athletic motion (skip during serve/toss)
+        if (!isServingRef.current && tossTimerRef.current === 0 && swingProgress.current > 0.28 && swingProgress.current < 0.7) {
+            targetLeftArmRot.x = THREE.MathUtils.lerp(targetLeftArmRot.x, -0.55, 0.65);
+            targetLeftArmRot.z = THREE.MathUtils.lerp(targetLeftArmRot.z, 0.55, 0.65);
+        }
+        
         // Simple IK Lengan (reach for ball)
         let nearestBall = null;
         let minDist = Infinity;
@@ -1545,8 +1552,17 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
       lerpRate = 13;                          // glide into charge stance
     }
     let lerpSpeed = 1 - Math.exp(-lerpRate * delta);
-    // The racket whip-cracks slightly ahead of the arm during the strike
-    const racketExtraRate = isSwinging.current && swingProgress.current >= 0.28 && swingProgress.current < 0.5 ? 20 : 6;
+    // --- WRIST LAG & WHIP (the secret of a satisfying swing) ---
+    // Windup: the racket TRAILS the arm (lag) while the body coils.
+    // Strike: the racket SNAP-PASSES the arm (whip) through the contact zone.
+    // Return: settles together with the arm.
+    let racketExtraRate = 8;
+    if (isSwinging.current) {
+      const pt = swingProgress.current;
+      if (pt < 0.28) racketExtraRate = -7;      // lag: racket whips back behind the arm
+      else if (pt < 0.5) racketExtraRate = 28;  // whip: racket snaps through the strike
+      else racketExtraRate = 12;                // settle
+    }
     let racketLerpSpeed = 1 - Math.exp(-(lerpRate + racketExtraRate) * delta);
 
     if (isSwinging.current && isServingRef.current) {

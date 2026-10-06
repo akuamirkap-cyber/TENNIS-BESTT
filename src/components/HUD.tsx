@@ -327,9 +327,7 @@ export function TopBar({
   onToggleMusic,
   onOpenAdvanced,
   tennisCamera,
-  stumbleCamera,
   onTennisCamera,
-  onStumbleCamera,
 }: {
   onExitToMenu: () => void;
   sfxOn: boolean;
@@ -338,12 +336,9 @@ export function TopBar({
   onToggleMusic: () => void;
   onOpenAdvanced: () => void;
   tennisCamera: 'broadcast' | 'gta';
-  stumbleCamera: 'default' | 'gta';
   onTennisCamera: (c: 'broadcast' | 'gta') => void;
-  onStumbleCamera: (c: 'default' | 'gta') => void;
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const gameMode = useEditorStore((s) => s.gameMode);
 
   const courtTheme = useEditorStore((s) => s.courtTheme);
   const ballColor = useEditorStore((s) => s.ballColor);
@@ -396,10 +391,7 @@ export function TopBar({
           🎵
         </CircleBtn>
         <CircleBtn
-          onClick={() => {
-            if (gameMode === 'tennis') onTennisCamera(tennisCamera === 'gta' ? 'broadcast' : 'gta');
-            else onStumbleCamera(stumbleCamera === 'gta' ? 'default' : 'gta');
-          }}
+          onClick={() => onTennisCamera(tennisCamera === 'gta' ? 'broadcast' : 'gta')}
           title="Camera angle"
         >
           🎥
@@ -416,39 +408,35 @@ export function TopBar({
             ⚙️ SETTINGS
           </div>
 
-          {gameMode === 'tennis' && (
-            <>
-              <button
-                onClick={cycleCourt}
-                className="w-full flex items-center justify-between bg-emerald-100 hover:bg-emerald-200 rounded-2xl px-4 py-2.5 mb-2 transition-colors"
-              >
-                <span className="font-extrabold text-emerald-800 text-sm">🏓 Court</span>
-                <span className="font-extrabold text-emerald-600 text-sm uppercase">{courtTheme}</span>
-              </button>
-              <button
-                onClick={cycleBall}
-                className="w-full flex items-center justify-between bg-yellow-100 hover:bg-yellow-200 rounded-2xl px-4 py-2.5 mb-2 transition-colors"
-              >
-                <span className="font-extrabold text-yellow-800 text-sm">🎾 Bola</span>
-                <span className="font-extrabold text-yellow-600 text-sm uppercase">{ballColor}</span>
-              </button>
-              <div className="bg-sky-100 rounded-2xl px-4 py-2.5 mb-2">
-                <div className="flex justify-between mb-1">
-                  <span className="font-extrabold text-sky-800 text-sm">📏 Panjang lapangan</span>
-                  <span className="font-extrabold text-sky-600 text-sm">{courtLength.toFixed(1)}m</span>
-                </div>
-                <input
-                  type="range"
-                  min="12"
-                  max="30"
-                  step="0.5"
-                  value={courtLength}
-                  onChange={(e) => setCourtLength(parseFloat(e.target.value))}
-                  className="w-full accent-sky-500"
-                />
-              </div>
-            </>
-          )}
+          <button
+            onClick={cycleCourt}
+            className="w-full flex items-center justify-between bg-emerald-100 hover:bg-emerald-200 rounded-2xl px-4 py-2.5 mb-2 transition-colors"
+          >
+            <span className="font-extrabold text-emerald-800 text-sm">🏓 Court</span>
+            <span className="font-extrabold text-emerald-600 text-sm uppercase">{courtTheme}</span>
+          </button>
+          <button
+            onClick={cycleBall}
+            className="w-full flex items-center justify-between bg-yellow-100 hover:bg-yellow-200 rounded-2xl px-4 py-2.5 mb-2 transition-colors"
+          >
+            <span className="font-extrabold text-yellow-800 text-sm">🎾 Bola</span>
+            <span className="font-extrabold text-yellow-600 text-sm uppercase">{ballColor}</span>
+          </button>
+          <div className="bg-sky-100 rounded-2xl px-4 py-2.5 mb-2">
+            <div className="flex justify-between mb-1">
+              <span className="font-extrabold text-sky-800 text-sm">📏 Panjang lapangan</span>
+              <span className="font-extrabold text-sky-600 text-sm">{courtLength.toFixed(1)}m</span>
+            </div>
+            <input
+              type="range"
+              min="12"
+              max="30"
+              step="0.5"
+              value={courtLength}
+              onChange={(e) => setCourtLength(parseFloat(e.target.value))}
+              className="w-full accent-sky-500"
+            />
+          </div>
 
           <button
             onClick={() => setIsAutoPlay(!isAutoPlay)}

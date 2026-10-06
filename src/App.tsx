@@ -18,7 +18,6 @@ import { MainMenu } from './components/MainMenu';
 import { ScoreBoard, ChargeGauge, ServePowerGauge, ActionButtons, TopBar } from './components/HUD';
 import { audioManager } from './utils/audio';
 import { useEditorStore } from './store';
-import { StumbleGuysLevel } from './components/StumbleGuysLevel';
 
 const dummyCube = Array(6).fill("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=");
 
@@ -225,12 +224,12 @@ export default function App() {
     }
   }, [screen]);
 
-  const handlePlay = (mode: 'tennis' | 'stumble') => {
+  const handlePlay = () => {
     const store = useEditorStore.getState();
     window.dispatchEvent(new CustomEvent('resetBalls'));
     store.resetMatch();
     store.setServerTurn('player');
-    store.setGameMode(mode);
+    store.setGameMode('tennis');
     store.setIsAutoPlay(false);
     store.setGameStarted(true);
     // Follow whatever sound choice was made in the menu
@@ -272,7 +271,6 @@ export default function App() {
   };
 
   const [cameraMode, setCameraMode] = useState<'orbit' | 'game'>('game');
-  const [stumbleCamera, setStumbleCamera] = useState<'default' | 'gta'>('gta');
   const courtLength = useEditorStore(state => state.courtLength);
   const [camConfig, setCamConfig] = useState({
     tennisGtaTargetY: 3.1,
@@ -477,25 +475,14 @@ export default function App() {
               characterRef={characterRef} 
               settings={cameraSettings} 
               gameMode={gameMode}
-              stumbleCamera={stumbleCamera}
               tennisCamera={tennisCamera}
               camConfig={camConfig}
             />
-            {gameMode === 'tennis' && (
-              <>
-                <TennisCourt theme={courtTheme} />
-                <Referee position={[6.2, 0, 0]} />
-                <TennisCharacter ref={characterRef} />
-                <TennisBall />
-                <HitParticles />
-              </>
-            )}
-            {gameMode === 'stumble' && (
-              <>
-                <StumbleGuysLevel />
-                <TennisCharacter ref={characterRef} />
-              </>
-            )}
+            <TennisCourt theme={courtTheme} />
+            <Referee position={[6.2, 0, 0]} />
+            <TennisCharacter ref={characterRef} />
+            <TennisBall />
+            <HitParticles />
           </Suspense>
         </Canvas>
       </div>
@@ -510,11 +497,9 @@ export default function App() {
           <ActionButtons />
           <ChargeGauge />
           <ServePowerGauge />
-          {gameMode === 'tennis' && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[900]">
-              <ScoreBoard />
-            </div>
-          )}
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[900]">
+            <ScoreBoard />
+          </div>
           <TopBar
             onExitToMenu={handleExitToMenu}
             sfxOn={sfxOn}
@@ -523,9 +508,7 @@ export default function App() {
             onToggleMusic={toggleMusic}
             onOpenAdvanced={() => setAdvancedOpen(true)}
             tennisCamera={tennisCamera}
-            stumbleCamera={stumbleCamera}
             onTennisCamera={setTennisCamera}
-            onStumbleCamera={setStumbleCamera}
           />
         </>
       )}

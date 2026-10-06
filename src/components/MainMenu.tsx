@@ -1,27 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { useEditorStore } from '../store';
 import { audioManager } from '../utils/audio';
 
 interface MainMenuProps {
-  onPlay: (mode: 'tennis' | 'stumble') => void;
+  onPlay: () => void;
 }
-
-const MODES = [
-  {
-    id: 'tennis' as const,
-    title: 'TENNIS MATCH',
-    desc: '1v1 melawan Bot pro',
-    emoji: '🎾',
-    gradient: 'from-lime-400 to-green-500',
-  },
-  {
-    id: 'stumble' as const,
-    title: 'STUMBLE RUN',
-    desc: 'Lari, lompat, hindari rintangan',
-    emoji: '🏃',
-    gradient: 'from-orange-400 to-rose-500',
-  },
-];
 
 const CHARACTERS = [
   { id: 'default' as const, label: 'PRO', emoji: '🧑‍🦱' },
@@ -45,8 +28,18 @@ function FloatingBall({ className, delay, size }: { className: string; delay: st
   );
 }
 
+function FloatingDeco({ className, delay, size, emoji }: { className: string; delay: string; size: number; emoji: string }) {
+  return (
+    <div
+      className={`absolute animate-hc-float pointer-events-none select-none ${className}`}
+      style={{ animationDelay: delay, fontSize: size }}
+    >
+      {emoji}
+    </div>
+  );
+}
+
 export function MainMenu({ onPlay }: MainMenuProps) {
-  const [selectedMode, setSelectedMode] = useState<'tennis' | 'stumble'>('tennis');
   const [exiting, setExiting] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const skinType = useEditorStore((s) => s.skinType);
@@ -62,7 +55,7 @@ export function MainMenu({ onPlay }: MainMenuProps) {
       audioManager.setMuted(false);
       audioManager.playWoosh();
     }
-    setTimeout(() => onPlay(selectedMode), 450);
+    setTimeout(() => onPlay(), 450);
   };
 
   return (
@@ -75,11 +68,14 @@ export function MainMenu({ onPlay }: MainMenuProps) {
       <div className="absolute inset-0 bg-gradient-to-b from-sky-500/90 via-cyan-400/80 to-emerald-400/85" />
       <div className="absolute inset-0 backdrop-blur-[3px]" />
 
-      {/* Decorative floating balls */}
+      {/* Decorative floating balls & stars */}
       <FloatingBall className="top-[12%] left-[8%]" delay="0s" size={72} />
       <FloatingBall className="top-[18%] right-[10%]" delay="1.2s" size={54} />
       <FloatingBall className="bottom-[15%] left-[14%]" delay="2.1s" size={44} />
       <FloatingBall className="bottom-[22%] right-[16%]" delay="0.7s" size={64} />
+      <FloatingDeco className="top-[30%] left-[18%]" delay="0.9s" size={40} emoji="⭐" />
+      <FloatingDeco className="top-[42%] right-[14%]" delay="1.7s" size={34} emoji="✨" />
+      <FloatingDeco className="bottom-[30%] left-[24%]" delay="2.6s" size={30} emoji="⭐" />
       <div className="absolute -bottom-32 -left-32 w-96 h-96 rounded-full bg-white/10" />
       <div className="absolute -top-24 -right-24 w-80 h-80 rounded-full bg-white/10" />
 
@@ -119,39 +115,13 @@ export function MainMenu({ onPlay }: MainMenuProps) {
             BESTT SMASH
           </span>
         </div>
-      </div>
-
-      {/* ===== Mode select ===== */}
-      <div className="relative z-10 mt-10 flex gap-4 animate-hc-slide-up" style={{ animationDelay: '0.1s' }}>
-        {MODES.map((m) => {
-          const active = selectedMode === m.id;
-          return (
-            <button
-              key={m.id}
-              onClick={() => setSelectedMode(m.id)}
-              className={`relative w-40 md:w-52 rounded-3xl p-4 text-left transition-all duration-200 ${
-                active
-                  ? `bg-gradient-to-br ${m.gradient} scale-105 shadow-[0_8px_0_rgba(0,0,0,0.25),0_16px_30px_rgba(0,0,0,0.3)] ring-4 ring-white`
-                  : 'bg-white/70 hover:bg-white/90 shadow-[0_6px_0_rgba(0,0,0,0.12)]'
-              }`}
-            >
-              <div className="text-4xl mb-1">{m.emoji}</div>
-              <div className={`text-base md:text-lg font-extrabold leading-tight ${active ? 'text-white' : 'text-slate-700'}`}>
-                {m.title}
-              </div>
-              <div className={`text-xs font-semibold ${active ? 'text-white/85' : 'text-slate-500'}`}>{m.desc}</div>
-              {active && (
-                <div className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-yellow-300 border-4 border-white flex items-center justify-center text-sm shadow-md">
-                  ✓
-                </div>
-              )}
-            </button>
-          );
-        })}
+        <div className="mt-3 text-white/95 text-sm md:text-base font-bold bg-black/25 rounded-full px-4 py-1 animate-hc-bounce">
+          🏆 Kalahkan sang Bot jago!
+        </div>
       </div>
 
       {/* ===== Character select ===== */}
-      <div className="relative z-10 mt-6 animate-hc-slide-up" style={{ animationDelay: '0.18s' }}>
+      <div className="relative z-10 mt-8 animate-hc-slide-up" style={{ animationDelay: '0.15s' }}>
         <div className="flex items-center gap-3 bg-white/40 rounded-full px-4 py-2 backdrop-blur-sm">
           <span className="text-xs font-extrabold text-white tracking-widest drop-shadow">CHARACTER</span>
           {CHARACTERS.map((c) => {
@@ -178,8 +148,8 @@ export function MainMenu({ onPlay }: MainMenuProps) {
       {/* ===== PLAY ===== */}
       <button
         onClick={handlePlay}
-        className="relative z-10 mt-9 px-16 py-4 rounded-full bg-gradient-to-b from-yellow-300 to-amber-500 hc-btn animate-hc-bounce overflow-hidden"
-        style={{ animationDelay: '0.25s' }}
+        className="relative z-10 mt-9 px-16 md:px-20 py-4 md:py-5 rounded-full bg-gradient-to-b from-yellow-300 to-amber-500 hc-btn animate-hc-bounce overflow-hidden"
+        style={{ animationDelay: '0.22s' }}
       >
         <span className="relative z-10 text-3xl md:text-4xl font-extrabold text-white tracking-widest drop-shadow-[0_3px_0_rgba(0,0,0,0.25)]">
           PLAY!
@@ -205,7 +175,7 @@ export function MainMenu({ onPlay }: MainMenuProps) {
       )}
 
       <div className="absolute bottom-3 w-full text-center text-white/70 text-xs font-bold tracking-widest">
-        v1.0 • HYPERCASUAL TENNIS
+        v1.1 • HYPERCASUAL TENNIS
       </div>
     </div>
   );

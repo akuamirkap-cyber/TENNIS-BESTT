@@ -1214,7 +1214,14 @@ export const BotCharacter = forwardRef<THREE.Group, any>((props, ref) => {
       lerpRate = 13;
     }
     let lerpSpeed = 1 - Math.exp(-lerpRate * delta);
-    const racketExtraRate = isSwinging.current && swingProgress.current >= 0.28 && swingProgress.current < 0.5 ? 20 : 6;
+    // --- WRIST LAG & WHIP (same system as the player) ---
+    let racketExtraRate = 8;
+    if (isSwinging.current) {
+      const pt = swingProgress.current;
+      if (pt < 0.28) racketExtraRate = -7;      // lag: racket trails while coiling
+      else if (pt < 0.5) racketExtraRate = 28;  // whip: snap through the strike
+      else racketExtraRate = 12;                // settle
+    }
     let racketLerpSpeed = 1 - Math.exp(-(lerpRate + racketExtraRate) * delta);
 
     

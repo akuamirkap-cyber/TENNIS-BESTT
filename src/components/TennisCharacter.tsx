@@ -1148,108 +1148,95 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
       }
     } else {
       // Calculate dynamic swing rotation (Tennis forehand)
+      // Trajectory verified against the head volume: windup stays back & WIDE,
+      // contact happens in front with the arm out, follow-through wraps across
+      // at chest height — the racket never passes through the head.
       if (t > 0 && t <= 1) {
-        if (t < 0.3) { 
-          // 1. Wind-up (draw arm back, twist torso deeper for power)
-          const p = t / 0.3;
-          // easeOutCubic: quick draw then settle at full cocked position
-          const ease = 1 - Math.pow(1 - p, 3);
-          // Anticipation: tiny counter-movement (forward nudge) before the pull-back
-          const ant = Math.sin(Math.min(p / 0.3, 1) * Math.PI) * 0.14 * (1 - p);
-          targetArmRot.set(0.2 + ant - ease * 1.4, -ease * 0.8, -0.3 - ease * 0.6); 
-          targetTorsoRot.set(0, -ease * 1.0, 0); // Deeper torso twist for power
-          targetRacketRot.set(Math.PI / 2 + 0.2 + ease * 0.6, ease * 0.4, -ease * 0.2);
-        } else if (t < 0.45) { 
-          
-          // 2. The Strike (Swing forward)
-          const p = (t - 0.3) / 0.15;
-          const ease = 1 - Math.pow(1 - p, 4); // Extremely snappy/powerful acceleration
-          
-          // Topspin vs Slice paths
-          const isSlice = activeAnim.current === 'anim2';
-          const isTopspin = activeAnim.current === 'anim1';
-          const pathY = isTopspin ? -0.6 + ease * 1.8 : (isSlice ? 0.2 - ease * 1.0 : -0.6 + ease * 1.4);
-          const pathZ = isTopspin ? -1.1 + ease * 1.5 : (isSlice ? -0.8 + ease * 0.6 : -1.1 + ease * 1.2);
-          
-          targetArmRot.set(
-            -1.0 + ease * 2.8, 
-            pathY, 
-            pathZ
-          );
-          targetTorsoRot.set(-ease * 0.2, -0.8 + ease * 1.6, ease * 0.1);
-          
-          // Racket Angle Alignment
+        // Verified-safe anchor poses
+        const W = { arm: [1.05, -0.45, -0.85], torso: [0, -0.55, 0], racket: [1.35, 0.55, -0.35] }; // windup
+        const C = { arm: [-0.5, 0.05, -0.5], torso: [0, 0.25, 0], racket: [1.9, 0.1, -0.05] };     // contact
+        const F = { arm: [0.45, 0.95, 0.2], torso: [0, 0.5, 0], racket: [2.25, -0.55, 0.85] };      // follow-through
+        const R = { arm: [0.2, 0, -0.3], torso: [0, 0, 0], racket: [1.77, 0, 0] };                  // ready
+        const mix3 = (a: number[], b: number[], p: number) => [
+          a[0] + (b[0] - a[0]) * p,
+          a[1] + (b[1] - a[1]) * p,
+          a[2] + (b[2] - a[2]) * p,
+        ];
+
+        if (t < 0.3) {
+          // 1. Wind-up: arm draws BACK and OUT to the side, torso coils
+          const p = 1 - Math.pow(1 - t / 0.3, 3); // easeOutCubic
+          const arm = mix3(R.arm, W.arm, p);
+          const torso = mix3(R.torso, W.torso, p);
+          const racket = mix3(R.racket, W.racket, p);
+          targetArmRot.set(arm[0], arm[1], arm[2]);
+          targetTorsoRot.set(torso[0], torso[1], torso[2]);
+          targetRacketRot.set(racket[0], racket[1], racket[2]);
+        } else if (t < 0.45) {
+          // 2. The Strike: racket whips forward through the contact zone (out wide)
+          const p = 1 - Math.pow(1 - (t - 0.3) / 0.15, 4); // extremely snappy acceleration
+          const arm = mix3(W.arm, C.arm, p);
+          const torso = mix3(W.torso, C.torso, p);
+          const racket = mix3(W.racket, C.racket, p);
+
+          // Racket face alignment toward the aim target (small, clamped)
           let wristAngle = 0;
           if (hitTargetRef.current) {
             const dx = hitTargetRef.current.x - characterRef.current.position.x;
             const dz = hitTargetRef.current.z - characterRef.current.position.z;
-            wristAngle = Math.atan2(dx, dz) * 0.3; // Align racket face to target
+            wristAngle = THREE.MathUtils.clamp(Math.atan2(dx, dz) * 0.3, -0.2, 0.2);
           }
-          
-          // Slice open racket face
-          const racketFace = isSlice ? (Math.PI / 2 + 0.9 - ease * 0.5) : (Math.PI / 2 + 0.7 - ease * 0.7);
-          
-          targetRacketRot.set(
-            racketFace, 
-            0.4 - ease * 0.4 + wristAngle, 
-            -0.2 + ease * 0.2
-          );
 
-          // Idea 14: Grip / Stance Compensation
-          if (nearestBall) {
-             const dx = nearestBall.state.position.x - characterRef.current.position.x;
-             const dz = nearestBall.state.position.z - characterRef.current.position.z;
-             if (Math.abs(dx) < 0.8 && Math.abs(dz) < 1.0) {
-                 // Bola sangat dekat badan (jammed) => animasi defensif (siku ditekuk)
-                 targetArmRot.z += 0.5; // Tekuk siku
-                 targetArmRot.y -= 0.5; // Tarik ke badan
-             }
-             
-             // Idea 11: Predictive IK (Tracking)
-             const dy = nearestBall.state.position.y - (characterRef.current.position.y + 1.0);
-             const distToBall = Math.sqrt(dx*dx + dy*dy + dz*dz);
-             if (distToBall < 3.0) {
-                 const angleToBall = Math.atan2(dy, Math.sqrt(dx*dx + dz*dz));
-                 const blend = Math.max(0, 1.0 - Math.abs(0.4 - t) * 5); // Peak di frame pukulan
-                 targetArmRot.x = THREE.MathUtils.lerp(targetArmRot.x, -angleToBall - Math.PI/2, blend * 0.5);
-             }
+          // Idea 14: Grip / Stance Compensation (jammed ball => tuck the elbow, clamped)
+          if (nearestBall && Math.abs(targetArmRot.z) < 0.8) {
+            const dx = nearestBall.state.position.x - characterRef.current.position.x;
+            const dz = nearestBall.state.position.z - characterRef.current.position.z;
+            if (Math.abs(dx) < 0.8 && Math.abs(dz) < 1.0) {
+              arm[2] += 0.3; // bend elbow in (clamped)
+              arm[1] -= 0.3; // pull toward body (clamped)
+            }
+            // Idea 11: Predictive IK (tracking) — clamped to the safe arm range
+            const dy = nearestBall.state.position.y - (characterRef.current.position.y + 1.0);
+            const distToBall = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            if (distToBall < 3.0) {
+              const angleToBall = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
+              const ikTarget = THREE.MathUtils.clamp(-angleToBall - Math.PI / 2, -1.25, 0.5);
+              const blend = Math.max(0, 1.0 - Math.abs(0.4 - t) * 5); // peaks at the hit frame
+              arm[0] = arm[0] + (ikTarget - arm[0]) * blend * 0.35;
+            }
           }
-      
-        } else if (t < 0.75) { 
-          
-          // 3. Follow through (Arm crosses body up high / opposite shoulder)
+
+          targetArmRot.set(arm[0], arm[1], arm[2]);
+          targetTorsoRot.set(torso[0], torso[1], torso[2]);
+          targetRacketRot.set(racket[0], racket[1] + wristAngle, racket[2]);
+        } else if (t < 0.75) {
+          // 3. Follow through: wraps ACROSS THE CHEST (below the head), with a
+          //    small organic overshoot (easeOutBack) and hit recoil
           const p = (t - 0.45) / 0.3;
-          // easeOutBack: organic overshoot past the target then settle
           const c1 = 1.35;
           const c3 = c1 + 1;
-          const ease = 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2);
-          
-          // Arm Recoil
+          const pe = Math.min(1, Math.max(0, 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2)));
+
           let recoil = 0;
           if (p < 0.2 && hitPowerRef.current > 0.8 && hasHitBall.current) {
-             recoil = Math.sin(p * Math.PI * 15) * 0.1 * (1 - p/0.2); // Vibrate
+            recoil = Math.sin(p * Math.PI * 15) * 0.1 * (1 - p / 0.2); // vibrate
           }
-          
-          targetArmRot.set(
-            1.8 + ease * 1.2 + recoil, 
-            0.8 + ease * 0.8 + recoil, 
-            0.1 + ease * 1.5
-          );
-          targetTorsoRot.set(-0.2 + ease * 0.4, 0.8 + ease * 0.8, 0.1 - ease * 0.2);
-          targetRacketRot.set(Math.PI / 2, -ease * 0.5, ease * 1.0);
-      
-        } else { 
-          // 4. Return to idle
-          const p = (t - 0.75) / 0.25;
-          // easeOut: moves quickly toward ready stance, lands gently
-          const ease = 1 - Math.pow(1 - p, 2.5);
-          targetArmRot.set(
-            2.6 * (1 - ease) + 0.2 * ease, 
-            1.2 * (1 - ease) + 0 * ease, 
-            0.9 * (1 - ease) - 0.3 * ease
-          );
-          targetTorsoRot.set(0, 1.2 * (1 - ease), 0);
-          targetRacketRot.set(Math.PI / 2 + 0.2 * ease, 0, 0.5 * (1 - ease));
+
+          const arm = mix3(C.arm, F.arm, pe);
+          const torso = mix3(C.torso, F.torso, pe);
+          const racket = mix3(C.racket, F.racket, pe);
+          targetArmRot.set(arm[0] + recoil, arm[1] + recoil, arm[2]);
+          targetTorsoRot.set(torso[0], torso[1], torso[2]);
+          targetRacketRot.set(racket[0], racket[1], racket[2]);
+        } else {
+          // 4. Return to ready stance — lands gently
+          const p = 1 - Math.pow(1 - (t - 0.75) / 0.25, 2.5);
+          const arm = mix3(F.arm, R.arm, p);
+          const torso = mix3(F.torso, R.torso, p);
+          const racket = mix3(F.racket, R.racket, p);
+          targetArmRot.set(arm[0], arm[1], arm[2]);
+          targetTorsoRot.set(torso[0], torso[1], torso[2]);
+          targetRacketRot.set(racket[0], racket[1], racket[2]);
         }
       }
     }
@@ -1465,13 +1452,14 @@ export const TennisCharacter = forwardRef<THREE.Group, any>((props, ref) => {
             const dist = b.state.position.distanceTo(characterRef.current!.position);
             if (dist < minDist) { minDist = dist; nearestBall = b; }
         });
-        if (nearestBall && swingProgress.current > 0.15 && swingProgress.current < 0.6) {
+        if (nearestBall && swingProgress.current > 0.15 && swingProgress.current < 0.6 && Math.abs(targetArmRot.z) < 0.8) {
             const ballPos = nearestBall.state.position;
             const charPos = characterRef.current.position;
             const heightDiff = ballPos.y - 1.2;
             const reachOffset = ballPos.x - charPos.x;
-            targetArmRot.z += heightDiff * 0.4; // Reach high/low
-            targetArmRot.x -= reachOffset * 0.3; // Reach wide
+            // Clamped so the IK can never drag the racket up into the head
+            targetArmRot.z += THREE.MathUtils.clamp(heightDiff * 0.4, -0.3, 0.3); // Reach high/low
+            targetArmRot.x -= THREE.MathUtils.clamp(reachOffset * 0.3, -0.3, 0.3); // Reach wide
         }
     }
     
